@@ -8,7 +8,7 @@ name: Publish Docker image
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    tags: ['v*']
   workflow_dispatch:
 
 concurrency:
@@ -37,8 +37,6 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      # 先跑 Go 侧再装前端依赖:装完之后 node_modules 里会多出一个
-      # 不属于本项目的 Go 包,./... 会把它也扫进去。
       - name: Go vet
         run: go vet ./...
 
@@ -48,7 +46,6 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          # 版本唯一来源是 web/package.json 的 packageManager 字段。
           bun-version-file: web/package.json
 
       - name: Install frontend dependencies
