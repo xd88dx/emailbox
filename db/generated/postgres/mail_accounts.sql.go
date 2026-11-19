@@ -267,6 +267,30 @@ func (q *Queries) CreateMailAccount(ctx context.Context, arg CreateMailAccountPa
 	return err
 }
 
+const decrementMailAccountUnread = `-- name: DecrementMailAccountUnread :execrows
+UPDATE mail_accounts
+SET unread_count = GREATEST(unread_count - $1, 0),
+    updated_at = CURRENT_TIMESTAMP
+WHERE tenant_id = $2 AND id = $3 AND deleted_at IS NULL
+`
+
+type DecrementMailAccountUnreadParams struct {
+	Amount   int32
+	TenantID string
+	ID       string
+}
+
+// Batch mark-read subtracts the messages that were unread when the client
+// selected them. unread_checked_at is deliberately left alone: this number
+// was not verified against the server, so the next check must still run.
+func (q *Queries) DecrementMailAccountUnread(ctx context.Context, arg DecrementMailAccountUnreadParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, decrementMailAccountUnread, arg.Amount, arg.TenantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getMailAccount = `-- name: GetMailAccount :one
 SELECT id, tenant_id, group_id, email, email_normalized, provider, account_type, auth_channel, password_enc, client_id, refresh_token_enc, imap_host, imap_port, imap_password_enc, status, remark, sort_order, proxy_url, fallback_proxy_url_1, fallback_proxy_url_2, last_refresh_at, last_refresh_status, last_refresh_error, refresh_token_updated_at, created_at, updated_at, deleted_at, last_refresh_error_kind, health_status, health_error_kind, health_error, health_checked_at, unread_count, unread_checked_at FROM mail_accounts
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL LIMIT 1

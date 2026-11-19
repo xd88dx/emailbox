@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"time"
 
 	"emailbox/pkg/job"
 	"emailbox/pkg/mailer"
@@ -35,8 +34,9 @@ func (s *UnreadService) Type() string { return model.JobTypeUnreadCheck }
 
 // SubmitBatch 提交一次收信检查任务。
 //
-// scope=selected 时不做冷却过滤:用户明确选中了这些账号,就应该真的查一次;
-// 全部/分组检查则跳过 60 秒内刚查过的账号,避免连点刷新把上游打两遍。
+// 一次刷新就是对当前范围内所有账号各查一遍。不做「刚查过就跳过」的冷却:
+// 那会让用户看到一次刷新只有零星几个账号有结果(其余被静默跳过),
+// 而实际压力已经由单任务互斥与按服务商的并发/速率限制住了。
 func (s *UnreadService) SubmitBatch(
 	ctx context.Context, tenantID, userID, scope string, accountIDs, groupIDs []string,
 ) (*model.Job, error) {
@@ -48,11 +48,8 @@ func (s *UnreadService) SubmitBatch(
 	if err != nil {
 		return nil, err
 	}
-	if scope != CheckScopeSelected {
-		accounts = filterRecentlyChecked(accounts, time.Now().Add(-unreadRecheckCooldown))
-	}
 	if len(accounts) == 0 {
-		return nil, errors.New("没有可检查的账号(刚检查过、已停用或已被封禁)")
+		return nil, errors.New("没有可检查的账号(已停用或已被封禁)")
 	}
 
 	j, items := newMailJob(model.JobTypeUnreadCheck, tenantID, userID,
@@ -95,19 +92,7 @@ func (s *UnreadService) Run(ctx context.Context, j model.Job, item model.JobItem
 			return job.Result{Status: model.JobItemFailed, Message: truncateError(err.Error())}
 		}
 	}
-	return job.Result{Status: model.JobItemSuccess}
-}
-
-// filterRecentlyChecked 去掉 cutoff 之后已经检查过的账号。
-func filterRecentlyChecked(accounts []model.MailAccount, cutoff time.Time) []model.MailAccount {
-	out := make([]model.MailAccount, 0, len(accounts))
-	for _, account := range accounts {
-		if account.UnreadCheckedAt != nil && account.UnreadCheckedAt.After(cutoff) {
-			continue
-		}
-		out = append(out, account)
-	}
-	return out
+	return job.Result{Status: model.JobItemSuccess, Unread: &count}
 }
 
 // ensureNoMailJob 保证收信检查与批量已读不会同时跑。

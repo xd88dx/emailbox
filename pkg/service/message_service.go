@@ -234,20 +234,52 @@ func (s *MessageService) Attachment(
 func (s *MessageService) MarkRead(
 	ctx context.Context, tenantID, accountID string, items []mailer.MessageRef,
 ) (mailer.BatchResult, error) {
-	return s.batch(ctx, tenantID, accountID, items,
+	result, err := s.batch(ctx, tenantID, accountID, items,
 		func(c mailer.Client, cred mailer.Credential, refs []mailer.MessageRef) (mailer.BatchResult, error) {
 			return c.MarkRead(ctx, cred, refs)
 		})
+	if err != nil {
+		return result, err
+	}
+	s.adjustUnreadAfterBatch(ctx, tenantID, accountID, result.Items)
+	return result, nil
+}
+
+// adjustUnreadAfterBatch 扣掉批量操作里成功处理掉的收件箱未读邮件。
+//
+// 标已读和删除都会让一封信从「未读」里消失。邮件本身由客户端在选中时标注
+// WasUnread,服务层只做近似修正;下一次收信检查仍以服务端结果为准。
+func (s *MessageService) adjustUnreadAfterBatch(
+	ctx context.Context, tenantID, accountID string, items []mailer.ItemResult,
+) {
+	unread := 0
+	for _, item := range items {
+		if item.OK && item.Ref.WasUnread && item.Ref.Folder == mailer.FolderInbox {
+			unread++
+		}
+	}
+	if unread == 0 {
+		return
+	}
+	if err := s.store.DecrementMailAccountUnread(ctxDetached(ctx), tenantID, accountID, unread); err != nil &&
+		!errors.Is(err, repo.ErrNotFound) {
+		slog.Warn("扣减未读数失败", "account_id", accountID, "error", err)
+	}
 }
 
 // Delete 批量删除。
 func (s *MessageService) Delete(
 	ctx context.Context, tenantID, accountID string, items []mailer.MessageRef,
 ) (mailer.BatchResult, error) {
-	return s.batch(ctx, tenantID, accountID, items,
+	result, err := s.batch(ctx, tenantID, accountID, items,
 		func(c mailer.Client, cred mailer.Credential, refs []mailer.MessageRef) (mailer.BatchResult, error) {
 			return c.Delete(ctx, cred, refs)
 		})
+	if err != nil {
+		return result, err
+	}
+	s.adjustUnreadAfterBatch(ctx, tenantID, accountID, result.Items)
+	return result, nil
 }
 
 func (s *MessageService) batch(

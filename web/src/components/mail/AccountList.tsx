@@ -5,6 +5,7 @@ import { Pagination } from "@cloudflare/kumo/components/pagination";
 import { Select } from "@cloudflare/kumo/components/select";
 import { PencilSimple, Tray } from "@phosphor-icons/react";
 import type { AccountStatus, MailAccount } from "@/api/mail";
+import type { RecentItem } from "@/store/jobStore";
 import { useSelectionStore } from "@/store/selectionStore";
 import { EmptyState } from "./EmptyState";
 import { StatusDot } from "./StatusDot";
@@ -48,6 +49,8 @@ interface AccountListProps {
   total: number;
   onPageChange: (page: number) => void;
   onPerPageChange: (perPage: number) => void;
+  // 收信检查的逐账号结果:成功且无新邮件显示绿点,失败显示红点。
+  checkResults?: Record<string, RecentItem>;
 }
 
 export function AccountList({
@@ -61,6 +64,7 @@ export function AccountList({
   total,
   onPageChange,
   onPerPageChange,
+  checkResults,
 }: AccountListProps) {
   const selected = useSelectionStore((s) => s.selected);
   const selectPage = useSelectionStore((s) => s.selectPage);
@@ -109,6 +113,7 @@ export function AccountList({
               active={account.id === activeID}
               onSelect={onSelect}
               onEdit={onEdit}
+              check={checkResults?.[account.id]}
             />
           )}
         />
@@ -159,15 +164,20 @@ function AccountRow({
   active,
   onSelect,
   onEdit,
+  check,
 }: {
   account: MailAccount;
   active: boolean;
   onSelect: (account: MailAccount) => void;
   onEdit: (account: MailAccount) => void;
+  check?: RecentItem;
 }) {
   // 只订阅这一行的选中状态，避免勾选任何一行都让整张列表重渲染。
   const checked = useSelectionStore((s) => s.selected.has(account.id));
   const toggle = useSelectionStore((s) => s.toggle);
+  const displayUnread = check?.unread ?? account.unread_count;
+  const checkFailed = check?.status === "failed";
+  const checkedNoMail = check?.status === "success" && check.unread === 0;
 
   return (
     <div
@@ -199,17 +209,26 @@ function AccountRow({
             +{account.aliases.length} 别名
           </span>
         )}
-        {account.unread_count > 0 && (
+        {checkFailed ? (
+          // 检查失败优先级最高:即使库里还留着旧的未读数,也不能假装它是最新结果。
+          <span
+            className="ml-2 flex shrink-0 items-center"
+            title={`检查失败:${check?.error || check?.errorKind || "未知原因"}`}
+          >
+            <StatusDot tone="error" label="收信检查失败" />
+          </span>
+        ) : checkedNoMail ? (
+          <span className="ml-2 flex shrink-0 items-center">
+            <StatusDot tone="online" label="已检查,无新邮件" />
+          </span>
+        ) : displayUnread > 0 ? (
           // 未读数是收信检查的缓存值,不是实时读:title 里不说「当前」,
           // 免得用户以为它随邮件的到达即时变化。
-          <span
-            className="ml-2 flex shrink-0 items-center gap-1 text-xs font-medium text-kumo-link tabular-nums"
-            title="最近一次收信检查发现的收件箱未读数"
-          >
-            <StatusDot tone="unread" label={`${account.unread_count} 封未读`} />
-            {account.unread_count > 99 ? "99+" : account.unread_count}
+          <span className="ml-2 flex shrink-0 items-center gap-1 text-xs font-medium text-kumo-link tabular-nums">
+            <StatusDot tone="unread" label={`${displayUnread} 封未读`} />
+            {displayUnread > 99 ? "99+" : displayUnread}
           </span>
-        )}
+        ) : null}
       </div>
       <span className={`${SECONDARY_CELL} truncate text-kumo-subtle`}>{account.provider}</span>
       <span>

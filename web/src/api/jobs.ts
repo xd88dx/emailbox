@@ -99,6 +99,8 @@ export interface ItemPayload {
   status: JobItemStatus;
   error_kind: string;
   error: string;
+  // 仅收信检查任务的成功项带上:0 表示已检查且没有新邮件。
+  unread?: number;
 }
 
 export interface FinishedPayload {

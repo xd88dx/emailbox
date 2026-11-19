@@ -23,6 +23,7 @@ import { MailToolbar } from "@/components/mail/MailToolbar";
 import { MessageDetail } from "@/components/mail/MessageDetail";
 import { MessageList } from "@/components/mail/MessageList";
 import { refKey } from "@/components/mail/messageRef";
+import { useJobStore } from "@/store/jobStore";
 import { useSelectionStore } from "@/store/selectionStore";
 import { useTenantStore } from "@/store/tenantStore";
 
@@ -71,6 +72,9 @@ export default function MailPage({ scope }: MailPageProps = {}) {
   // 取回 Set 再 useMemo 成数组。
   const selectedSet = useSelectionStore((s) => s.selected);
   const selectedIDs = useMemo(() => Array.from(selectedSet), [selectedSet]);
+  // 收信检查任务的逐账号结果,用来在列表里实时显示绿/红点。
+  const jobType = useJobStore((s) => s.jobType);
+  const checkResults = useJobStore((s) => s.byAccount);
 
   // 右边两栏各自跟着一个选择：看哪个邮箱的信、看哪封信。
   // editAccount 是另一条线（改配置），和「看信」互不影响，所以分开存。
@@ -237,6 +241,7 @@ export default function MailPage({ scope }: MailPageProps = {}) {
         onOpen={setOpenMessage}
         onRemoved={onMessagesRemoved}
         onClose={closeAccount}
+        onAccountsChanged={reload}
       />
     </div>
   ) : null;
@@ -281,6 +286,7 @@ export default function MailPage({ scope }: MailPageProps = {}) {
         total={total}
         onPageChange={setPage}
         onPerPageChange={setPerPage}
+        checkResults={jobType === "unread_check" ? checkResults : undefined}
       />
 
       {/* 邮箱面板从右侧滑出,不参与主布局。它挂在账号列表这一栏里,

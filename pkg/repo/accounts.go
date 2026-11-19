@@ -360,6 +360,25 @@ func (s *Store) UpdateMailAccountUnread(ctx context.Context, tenantID, id string
 	return rowsAffected(n, e)
 }
 
+// DecrementMailAccountUnread 把批量标已读里确定为未读的邮件从缓存里扣掉。
+//
+// 用 SQL 的 MAX/GREATEST 夹到 0,并且是窄更新;不碰 unread_checked_at,
+// 让下一次收信检查仍然照常执行(这个数没有经过上游确认)。
+func (s *Store) DecrementMailAccountUnread(ctx context.Context, tenantID, id string, amount int) error {
+	var n int64
+	var e error
+	if s.driver == "sqlite" {
+		n, e = s.sqlite.DecrementMailAccountUnread(ctx, sqlitedb.DecrementMailAccountUnreadParams{
+			Amount: int64(amount), TenantID: tenantID, ID: id,
+		})
+	} else {
+		n, e = s.postgres.DecrementMailAccountUnread(ctx, postgresdb.DecrementMailAccountUnreadParams{
+			Amount: int32(amount), TenantID: tenantID, ID: id,
+		})
+	}
+	return rowsAffected(n, e)
+}
+
 // UpdateMailAccountAuthorization 只替换已经验证通过的 OAuth 凭据和刷新状态。
 // 账号的分组、备注、代理可能正在被用户编辑，重新授权绝不能整行覆盖。
 func (s *Store) UpdateMailAccountAuthorization(ctx context.Context, tenantID, id, clientID, tokenEnc, channel string) error {

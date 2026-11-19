@@ -24,10 +24,6 @@ import (
 // 上游看到的是同一批凭据的两倍请求,风控只会更快落下来。
 var ErrMailJobRunning = errors.New("已有收信检查或批量已读任务在运行,请等它结束后再提交")
 
-// unreadRecheckCooldown 是同一个账号两次未读检查之间的最短间隔。
-// 用户连点刷新时,第二次不再重复打上游——刚查过的结果就是最新的。
-const unreadRecheckCooldown = 60 * time.Second
-
 // mailJobScope 是这两个任务共用的选取参数。
 type mailJobScope struct {
 	Scope      string

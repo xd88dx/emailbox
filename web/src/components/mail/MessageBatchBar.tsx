@@ -23,7 +23,7 @@ export function MessageBatchBar({
   const { error, pending, run } = useAsyncAction();
   if (messages.length === 0) return null;
 
-  const refs = messages.map(toRef);
+  const refs = messages.map((message) => ({ ...toRef(message), was_unread: !message.is_read }));
 
   // 后端逐封返回成功与否（部分失败是常态：一封信可能已经在别处被删了），
   // 只把 ok 的那些应用到界面上，失败的留在原地并把条数说清楚。

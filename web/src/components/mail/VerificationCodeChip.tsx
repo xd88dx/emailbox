@@ -24,7 +24,6 @@ export function VerificationCodeChip({ code }: { code: string }) {
       <button
         type="button"
         aria-label={copied ? "已复制验证码" : `复制验证码 ${code}`}
-        title={copied ? "已复制" : "复制"}
         className="ml-0.5 grid size-5 shrink-0 place-items-center rounded text-kumo-subtle hover:bg-kumo-interact hover:text-kumo-strong"
         onClick={(event) => {
           event.stopPropagation();

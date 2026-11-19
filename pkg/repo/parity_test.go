@@ -576,6 +576,31 @@ func TestUnreadSortParity(t *testing.T) {
 		if rows[0].UnreadCount != 3 {
 			t.Errorf("%s: 未读数未写回: %d", e.name, rows[0].UnreadCount)
 		}
+
+		// 标已读后的扣减必须夹到 0,两个引擎用 MAX / GREATEST 各写一份。
+		if err := e.store.UpdateMailAccountUnread(ctx, tenantID, ids[0], 5); err != nil {
+			t.Fatalf("%s: %v", e.name, err)
+		}
+		if err := e.store.DecrementMailAccountUnread(ctx, tenantID, ids[0], 2); err != nil {
+			t.Fatalf("%s: %v", e.name, err)
+		}
+		account, err := e.store.GetMailAccount(ctx, tenantID, ids[0])
+		if err != nil {
+			t.Fatalf("%s: %v", e.name, err)
+		}
+		if account.UnreadCount != 3 {
+			t.Errorf("%s: 扣减后未读数 = %d,期望 3", e.name, account.UnreadCount)
+		}
+		if err := e.store.DecrementMailAccountUnread(ctx, tenantID, ids[0], 10); err != nil {
+			t.Fatalf("%s: %v", e.name, err)
+		}
+		account, err = e.store.GetMailAccount(ctx, tenantID, ids[0])
+		if err != nil {
+			t.Fatalf("%s: %v", e.name, err)
+		}
+		if account.UnreadCount != 0 {
+			t.Errorf("%s: 未读数应夹到 0,实际 %d", e.name, account.UnreadCount)
+		}
 	}
 }
 

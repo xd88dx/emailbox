@@ -95,6 +95,10 @@ type Querier interface {
 	// Explanations live in pkg/repo/quotas.go instead.
 	CreateTenantQuota(ctx context.Context, arg CreateTenantQuotaParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
+	// Batch mark-read subtracts the messages that were unread when the client
+	// selected them. unread_checked_at is deliberately left alone: this number
+	// was not verified against the server, so the next check must still run.
+	DecrementMailAccountUnread(ctx context.Context, arg DecrementMailAccountUnreadParams) (int64, error)
 	DeleteExpiredOAuthAuthorizations(ctx context.Context, tenantID string) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) error
 	// Retention sweep. job_items and job_events go with the row via ON DELETE

@@ -21,6 +21,8 @@ type Result struct {
 	Status    string
 	ErrorKind string
 	Message   string
+	// Unread 只在收信检查的成功项上出现:前端据此区分「无新邮件」和「有未读」。
+	Unread *int
 }
 
 // Runner 执行单个 item。由业务侧实现（RefreshService），

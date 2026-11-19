@@ -57,6 +57,8 @@ interface MessageListProps {
   // 收起整栏收件箱。移动端是「返回账号列表」（那时账号列表被这一栏盖住了），
   // 桌面端是右上角那个关闭按钮——两边同一个动作，都回到「没有选中邮箱」。
   onClose: () => void;
+  // 批量标已读后通知外层刷新账号列表里的未读标识。
+  onAccountsChanged?: () => void;
 }
 
 export function MessageList({
@@ -66,6 +68,7 @@ export function MessageList({
   onOpen,
   onRemoved,
   onClose,
+  onAccountsChanged,
 }: MessageListProps) {
   const [folder, setFolder] = useState<MailFolder>("inbox");
   const [readFilter, setReadFilter] = useState<ReadFilter>("all");
@@ -80,6 +83,7 @@ export function MessageList({
   // 自动打开/切换邮箱走一分钟缓存;右上角手动刷新绕过缓存,但 5 秒内只能点一次。
   // 每一次强制刷新都是真实的上游调用并扣一次取件额度。
   const forceRef = useRef(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [cooldown, setCooldown] = useState(false);
   const cooldownTimer = useRef<number | null>(null);
   useEffect(
@@ -89,8 +93,9 @@ export function MessageList({
     [],
   );
   const manualRefresh = () => {
-    if (cooldown) return;
+    if (cooldown || refreshing) return;
     forceRef.current = true;
+    setRefreshing(true);
     setReloadToken((v) => v + 1);
     setCooldown(true);
     cooldownTimer.current = window.setTimeout(() => setCooldown(false), 5000);
@@ -132,6 +137,8 @@ export function MessageList({
         }));
       } catch (e) {
         if (!ignore) patch(key, (prev) => ({ ...prev, error: message(e), loading: false }));
+      } finally {
+        if (!ignore) setRefreshing(false);
       }
     })();
     return () => {
@@ -178,8 +185,9 @@ export function MessageList({
         items: prev.items.map((m) => (keys.has(refKey(m)) ? { ...m, is_read: true } : m)),
         selected: new Set(),
       }));
+      onAccountsChanged?.();
     },
-    [key, patch],
+    [key, patch, onAccountsChanged],
   );
 
   const applyDelete = useCallback(
@@ -191,8 +199,9 @@ export function MessageList({
         selected: new Set(),
       }));
       onRemoved([...keys]);
+      onAccountsChanged?.();
     },
-    [key, patch, onRemoved],
+    [key, patch, onRemoved, onAccountsChanged],
   );
 
   const selectedMessages = view.items.filter((m) => view.selected.has(refKey(m)));
@@ -225,9 +234,9 @@ export function MessageList({
           className="ml-auto"
           size="sm"
           variant="ghost"
-          loading={view.loading || cooldown}
-          disabled={view.loading || cooldown}
-          aria-label={cooldown ? "刚刚刷新过" : "重新拉取"}
+          loading={view.loading || refreshing || cooldown}
+          disabled={view.loading || refreshing || cooldown}
+          aria-label={refreshing ? "正在刷新" : cooldown ? "刚刚刷新过" : "重新拉取"}
           onClick={manualRefresh}
         />
         {/* 桌面端的关闭。上面那个返回按钮是 md:hidden 的，宽屏下不渲染，

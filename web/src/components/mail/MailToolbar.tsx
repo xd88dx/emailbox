@@ -96,8 +96,6 @@ export function MailToolbar({ tenantID, onReload, onExport }: MailToolbarProps) 
 
   const runningUnread = active && ownJob?.kind === "unread";
   const runningRead = active && ownJob?.kind === "read";
-  const refreshLabel =
-    job.progress.total > 0 ? `${job.progress.done}/${job.progress.total}` : "检查中";
   const refreshPercent =
     job.progress.total > 0 ? Math.min(100, (job.progress.done / job.progress.total) * 100) : 0;
   const readPercent = refreshPercent;
@@ -117,21 +115,16 @@ export function MailToolbar({ tenantID, onReload, onExport }: MailToolbarProps) 
         导出
       </Button>
       {/* 进度直接画在按钮上:再放一个「停止」按钮会让工具栏宽度在任务开始/结束时跳一次。
-          运行中按钮本身就是停止入口,图标和 title 都提示这一点。
-          标签用固定宽度,避免「刷新」与「12/50」把相邻按钮挤来挤去。 */}
-      <div
-        className="relative shrink-0"
-        title={runningUnread ? "点击停止检查" : "检查各邮箱的未读数"}
-      >
+          标签固定为「刷新」,进度只在底边显示,按钮宽度与「导入/导出」完全一致;
+          运行中按钮本身就是停止入口。 */}
+      <div className="relative shrink-0">
         <Button
           variant="secondary"
           icon={runningUnread ? SpinningCircle : ArrowsClockwise}
-          disabled={pending || (active && !runningUnread)}
-          onClick={runningUnread ? stopJob : submitUnread}
+          disabled={pending || active}
+          onClick={submitUnread}
         >
-          <span className="inline-block min-w-16 text-center tabular-nums">
-            {runningUnread ? refreshLabel : "刷新"}
-          </span>
+          刷新
         </Button>
         {runningUnread && (
           <span className="pointer-events-none absolute inset-x-1.5 bottom-1 h-0.5 overflow-hidden rounded-full bg-kumo-tint">
@@ -147,10 +140,7 @@ export function MailToolbar({ tenantID, onReload, onExport }: MailToolbarProps) 
 
       {/* 与「刷新」同一套逻辑:进度画在按钮内部,再点一次就是停止。
           标签固定为「已读」,只换图标,宽度不随进度变化,免得整排按钮跟着挪。 */}
-      <div
-        className="relative shrink-0"
-        title={runningRead ? "点击停止标记已读" : "把选中邮箱的所有邮件标为已读"}
-      >
+      <div className="relative shrink-0">
         <Button
           variant="secondary"
           icon={runningRead ? SpinningCircle : EnvelopeOpen}

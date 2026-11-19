@@ -340,3 +340,12 @@ SET unread_count = $1,
     unread_checked_at = CURRENT_TIMESTAMP,
     updated_at = CURRENT_TIMESTAMP
 WHERE tenant_id = $2 AND id = $3 AND deleted_at IS NULL;
+
+-- Batch mark-read subtracts the messages that were unread when the client
+-- selected them. unread_checked_at is deliberately left alone: this number
+-- was not verified against the server, so the next check must still run.
+-- name: DecrementMailAccountUnread :execrows
+UPDATE mail_accounts
+SET unread_count = GREATEST(unread_count - sqlc.arg(amount), 0),
+    updated_at = CURRENT_TIMESTAMP
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id) AND deleted_at IS NULL;

@@ -195,6 +195,8 @@ export interface MessageRef {
   id: string;
   id_mode: IDMode;
   folder: MailFolder;
+  // 标已读时带上选中那一刻是否未读,服务端据此扣减账号的未读缓存。
+  was_unread?: boolean;
 }
 
 export interface MessageBatchResult {

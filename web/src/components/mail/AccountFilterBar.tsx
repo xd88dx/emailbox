@@ -90,7 +90,6 @@ export function AccountFilterBar({
             <button
               type="button"
               aria-label="清除关键字"
-              title="清除"
               className="absolute inset-y-0 right-0 flex w-7 items-center justify-center text-kumo-subtle hover:text-kumo-strong"
               onClick={() => onQueryChange("")}
             >

@@ -108,6 +108,9 @@ type MessageRef struct {
 	ID     string `json:"id"`
 	IDMode string `json:"id_mode"`
 	Folder Folder `json:"folder"`
+	// WasUnread 由调用方在批量标已读时带上:协议层只负责写 \Seen 标记,
+	// 服务层靠它把账号的未读缓存减掉相应条数(只算收件箱)。
+	WasUnread bool `json:"was_unread,omitempty"`
 }
 
 // ListOptions 是列表请求的参数。

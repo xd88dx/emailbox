@@ -21,6 +21,7 @@ export interface RecentItem {
   status: ItemPayload["status"];
   errorKind: string;
   error: string;
+  unread?: number;
 }
 
 interface JobProgress {
@@ -38,6 +39,9 @@ interface JobState {
   status: JobStatus | null;
   progress: JobProgress;
   recent: RecentItem[];
+  // 按账号索引的最近结果。recent 只留 50 条给界面列表,
+  // 而收信检查要在账号列表上逐个显示绿/红点,不能因为条数上限丢结果。
+  byAccount: Record<string, RecentItem>;
   summary: string;
   // lastEventID 是断线重连的续看位置。它必须一直维护着——
   // 浏览器原生 EventSource 会自动带 Last-Event-ID 重连，但我们在
@@ -67,6 +71,7 @@ export const useJobStore = create<JobState>((set, get) => ({
   status: null,
   progress: emptyProgress,
   recent: [],
+  byAccount: {},
   summary: "",
   lastEventID: 0,
   error: "",
@@ -81,6 +86,7 @@ export const useJobStore = create<JobState>((set, get) => ({
         status: null,
         progress: emptyProgress,
         recent: [],
+        byAccount: {},
         summary: "",
         lastEventID: 0,
         error: "",
@@ -124,18 +130,20 @@ export const useJobStore = create<JobState>((set, get) => ({
         const message = event as MessageEvent;
         remember(message);
         const payload = JSON.parse(message.data) as ItemPayload;
-        set((state) => ({
-          recent: [
-            {
-              accountID: payload.account_id,
-              email: payload.email,
-              status: payload.status,
-              errorKind: payload.error_kind,
-              error: payload.error,
-            },
-            ...state.recent,
-          ].slice(0, MAX_RECENT),
-        }));
+        set((state) => {
+          const item: RecentItem = {
+            accountID: payload.account_id,
+            email: payload.email,
+            status: payload.status,
+            errorKind: payload.error_kind,
+            error: payload.error,
+            unread: payload.unread,
+          };
+          return {
+            recent: [item, ...state.recent].slice(0, MAX_RECENT),
+            byAccount: { ...state.byAccount, [payload.account_id]: item },
+          };
+        });
       });
 
       source.addEventListener("finished", (event) => {
@@ -178,6 +186,7 @@ export const useJobStore = create<JobState>((set, get) => ({
       status: null,
       progress: emptyProgress,
       recent: [],
+      byAccount: {},
       summary: "",
       lastEventID: 0,
       error: "",

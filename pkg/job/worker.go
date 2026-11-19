@@ -27,6 +27,7 @@ type itemPayload struct {
 	Status    string `json:"status"`
 	ErrorKind string `json:"error_kind"`
 	Error     string `json:"error"`
+	Unread    *int   `json:"unread,omitempty"`
 }
 
 // finishedPayload 是 finished 事件的内容。
@@ -188,7 +189,7 @@ func (m *Manager) runItem(ctx context.Context, job model.Job, runner Runner, ite
 
 	m.emit(ctx, job.ID, model.JobEventItem, itemPayload{
 		AccountID: item.AccountID, Email: item.Email, Status: result.Status,
-		ErrorKind: result.ErrorKind, Error: result.Message,
+		ErrorKind: result.ErrorKind, Error: result.Message, Unread: result.Unread,
 	})
 }
 
