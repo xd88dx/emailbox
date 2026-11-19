@@ -113,6 +113,11 @@ type MailAccount struct {
 	HealthError     string       `json:"health_error"`
 	HealthCheckedAt *time.Time   `json:"health_checked_at"`
 
+	// UnreadCount 是最近一次收信检查得到的收件箱未读数,只用于列表置顶与标识。
+	// 它不是实时值:邮件不落库,只有检查任务跑过才会更新。
+	UnreadCount     int        `json:"unread_count"`
+	UnreadCheckedAt *time.Time `json:"unread_checked_at"`
+
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	DeletedAt *time.Time `json:"-"`

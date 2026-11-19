@@ -1,6 +1,6 @@
 import { Button, RefreshButton } from "@cloudflare/kumo/components/button";
 import { CaretLeft, Envelope, X } from "@phosphor-icons/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   mailApi,
   type MailFolder,
@@ -77,6 +77,25 @@ export function MessageList({
 
   const [page, setPage] = useState(() => emptyPage(key));
 
+  // 自动打开/切换邮箱走一分钟缓存;右上角手动刷新绕过缓存,但 5 秒内只能点一次。
+  // 每一次强制刷新都是真实的上游调用并扣一次取件额度。
+  const forceRef = useRef(false);
+  const [cooldown, setCooldown] = useState(false);
+  const cooldownTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (cooldownTimer.current) window.clearTimeout(cooldownTimer.current);
+    },
+    [],
+  );
+  const manualRefresh = () => {
+    if (cooldown) return;
+    forceRef.current = true;
+    setReloadToken((v) => v + 1);
+    setCooldown(true);
+    cooldownTimer.current = window.setTimeout(() => setCooldown(false), 5000);
+  };
+
   // 渲染期同步重置（React 官方的 adjusting-state-when-props-change 模式）。
   // 这一版的输出会被 React 丢弃并立刻用新 state 重渲染，所以下面统一用 view 而不是 page。
   let view = page;
@@ -94,9 +113,15 @@ export function MessageList({
 
   useEffect(() => {
     let ignore = false;
+    const force = forceRef.current;
+    forceRef.current = false;
     void (async () => {
       try {
-        const resp = await mailApi.messages(tenantID, accountID, { folder, top: PAGE_SIZE });
+        const resp = await mailApi.messages(tenantID, accountID, {
+          folder,
+          top: PAGE_SIZE,
+          refresh: force || undefined,
+        });
         if (ignore) return;
         patch(key, (prev) => ({
           ...prev,
@@ -200,9 +225,10 @@ export function MessageList({
           className="ml-auto"
           size="sm"
           variant="ghost"
-          disabled={view.loading}
-          aria-label="重新拉取"
-          onClick={() => setReloadToken((v) => v + 1)}
+          loading={view.loading || cooldown}
+          disabled={view.loading || cooldown}
+          aria-label={cooldown ? "刚刚刷新过" : "重新拉取"}
+          onClick={manualRefresh}
         />
         {/* 桌面端的关闭。上面那个返回按钮是 md:hidden 的，宽屏下不渲染，
             这一栏得有自己的出口。 */}

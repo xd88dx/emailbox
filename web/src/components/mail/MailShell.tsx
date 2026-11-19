@@ -18,7 +18,7 @@ export function MailShell({ toolbar, status, children }: MailShellProps) {
           剩下的高度全归它。min-h-0 + overflow-hidden 把滚动责任
           明确地推给再下一层的每个面板——少了这两个类，
           内部的虚拟列表会把整个外壳顶破（09 文档 §7.2）。 */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">{children}</div>
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">{children}</div>
       {status}
     </div>
   );

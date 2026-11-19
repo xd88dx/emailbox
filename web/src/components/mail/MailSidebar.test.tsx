@@ -53,15 +53,10 @@ function mockQuota(maxGroups: number) {
 
 // 挂载包一层 act：base-ui 的 Menu 在挂载后还会异步定位一次弹层，
 // 不包的话每个用例都会打一串 "not wrapped in act(...)"，把真正的失败淹掉。
-async function mount(
-  groups: MailGroupNode[],
-  onGroupsChanged = () => {},
-  activeAccountID: string | null = null,
-) {
+async function mount(groups: MailGroupNode[], onGroupsChanged = () => {}) {
   const element = (
     <MailSidebar
       tenantID="t1"
-      activeAccountID={activeAccountID}
       groups={groups}
       groupID={null}
       onGroupChange={() => {}}
@@ -235,22 +230,18 @@ describe("MailSidebar 的折叠", () => {
     expect(localStorage.getItem("emailbox.mail.sidebar.collapsed")).toBe("true");
   });
 
-  it("选中邮箱后自动收起账号状态和分组，仍可临时展开", async () => {
-    await mount([group("a", "客户 A")], () => {}, "account-1");
+  it("选中邮箱后左侧栏保持用户上次的展开状态", async () => {
+    await mount([group("a", "客户 A")]);
 
-    expect(screen.getByRole("button", { name: "展开邮箱侧栏" })).toBeTruthy();
-    expect(screen.queryByText("授权失效")).toBeNull();
-    expect(screen.getByRole("button", { name: "客户 A" })).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "展开邮箱侧栏" }));
-    });
+    // 默认偏好是展开:看信时左侧的账号状态与分组不能消失。
     expect(screen.getByText("授权失效")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "展开邮箱侧栏" })).toBeNull();
   });
 
   it("收起后仍能从管理入口展开分组段", async () => {
+    localStorage.setItem("emailbox.mail.sidebar.collapsed", "true");
     localStorage.setItem("emailbox.mail.sidebar.groups", "false");
-    await mount([group("a", "客户 A")], () => {}, "account-1");
+    await mount([group("a", "客户 A")]);
 
     expect(screen.getByRole("button", { name: "管理分组" })).toBeTruthy();
     expect(screen.queryByText("客户 A")).toBeNull();
@@ -287,7 +278,8 @@ describe("窄屏分组管理入口", () => {
           onGroupChange={() => {}}
           status=""
           onStatusChange={() => {}}
-          total={0}
+          query=""
+          onQueryChange={() => {}}
           onGroupsChanged={() => {}}
         />,
       );

@@ -55,32 +55,42 @@ func (c *Client) batchOp(
 		return mailer.BatchResult{}, nil
 	}
 	return withSession(ctx, c, cred, func(ctx context.Context, s *session) (mailer.BatchResult, error) {
-		result := mailer.BatchResult{Items: make([]mailer.ItemResult, 0, len(items))}
-		for start := 0; start < len(items); start += batchLimit {
-			end := min(start+batchLimit, len(items))
-			chunk := items[start:end]
-
-			chunkResults, err := c.runBatch(ctx, s, chunk, method, body)
-			if err != nil {
-				// 整批失败分两种：一种是这批请求本身不被接受（回退逐条还有机会），
-				// 一种是令牌/账号问题（逐条也是一样的结果，直接把错误抛上去，
-				// 让回退链决定要不要换通道）。
-				if !batchWorthFallback(err) {
-					return mailer.BatchResult{}, err
-				}
-				chunkResults = c.runOneByOne(ctx, s, chunk, method, body)
-			}
-			for _, r := range chunkResults {
-				if r.OK {
-					result.Succeeded++
-				} else {
-					result.Failed++
-				}
-				result.Items = append(result.Items, r)
-			}
-		}
-		return result, nil
+		return c.batchOpSession(ctx, s, items, method, body)
 	})
+}
+
+// batchOpSession 在已登录会话上执行批量操作。
+//
+// 单独抽出来是为了让「标全部已读」在同一个会话里连续处理多个文件夹:
+// 每个文件夹重新登录一次既慢,也会把上游请求量放大数倍。
+func (c *Client) batchOpSession(
+	ctx context.Context, s *session, items []mailer.MessageRef, method string, body any,
+) (mailer.BatchResult, error) {
+	result := mailer.BatchResult{Items: make([]mailer.ItemResult, 0, len(items))}
+	for start := 0; start < len(items); start += batchLimit {
+		end := min(start+batchLimit, len(items))
+		chunk := items[start:end]
+
+		chunkResults, err := c.runBatch(ctx, s, chunk, method, body)
+		if err != nil {
+			// 整批失败分两种：一种是这批请求本身不被接受（回退逐条还有机会），
+			// 一种是令牌/账号问题（逐条也是一样的结果，直接把错误抛上去，
+			// 让回退链决定要不要换通道）。
+			if !batchWorthFallback(err) {
+				return mailer.BatchResult{}, err
+			}
+			chunkResults = c.runOneByOne(ctx, s, chunk, method, body)
+		}
+		for _, r := range chunkResults {
+			if r.OK {
+				result.Succeeded++
+			} else {
+				result.Failed++
+			}
+			result.Items = append(result.Items, r)
+		}
+	}
+	return result, nil
 }
 
 // batchWorthFallback 判断 $batch 整批失败后逐条重试是否还有意义。

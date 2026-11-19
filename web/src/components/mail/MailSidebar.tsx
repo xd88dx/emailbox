@@ -50,7 +50,6 @@ type Dialog =
 interface MailSidebarProps {
   tenantID: TenantRef;
   /** 当前正在查看的账号。选中后侧栏自动缩成图标列，给邮件列表让出空间。 */
-  activeAccountID?: string | null;
   groups: MailGroupNode[];
   groupID: string | null;
   onGroupChange: (groupID: string | null) => void;
@@ -64,7 +63,6 @@ interface MailSidebarProps {
 
 export function MailSidebar({
   tenantID,
-  activeAccountID = null,
   groups,
   groupID,
   onGroupChange,
@@ -77,26 +75,11 @@ export function MailSidebar({
     "emailbox.mail.sidebar.collapsed",
     false,
   );
-  // 自动折叠不覆盖用户的长期偏好：没有选中账号时回到 localStorage 里的状态；
-  // 正在看信时，用户仍可点一次箭头临时展开侧栏。用渲染期同步重置，避免 effect
-  // 晚一帧把上一个账号的「已展开」状态带到新账号上。
-  const [focusState, setFocusState] = useState<{
-    accountID: string | null;
-    manuallyExpanded: boolean;
-  }>(() => ({ accountID: activeAccountID, manuallyExpanded: false }));
-  let focusView = focusState;
-  if (focusState.accountID !== activeAccountID) {
-    focusView = { accountID: activeAccountID, manuallyExpanded: false };
-    setFocusState(focusView);
-  }
-  const collapsed = activeAccountID ? !focusView.manuallyExpanded : storedCollapsed;
-  const toggleCollapsed = () => {
-    if (activeAccountID) {
-      setFocusState((prev) => ({ ...prev, manuallyExpanded: !prev.manuallyExpanded }));
-    } else {
-      toggleStoredCollapsed();
-    }
-  };
+  // 收起只跟随用户的长期偏好，不再因为选中账号而自动折叠：
+  // 左侧的账号状态与分组正是判断「这封信属于哪一批」的依据，
+  // 看信时把它抽走，用户得反复展开才能确认。
+  const collapsed = storedCollapsed;
+  const toggleCollapsed = toggleStoredCollapsed;
   const [statusOpen, toggleStatus] = usePersistedOpen("emailbox.mail.sidebar.status");
   const [groupsOpen, toggleGroups] = usePersistedOpen("emailbox.mail.sidebar.groups");
   const [dialog, setDialog] = useState<Dialog | null>(null);
@@ -111,13 +94,7 @@ export function MailSidebar({
   // 再做一套编辑面板，既复用现有行内菜单，也避免把筛选图标变成含义不明的
   // 双击/右键操作。
   const openGroupManager = () => {
-    if (collapsed) {
-      if (activeAccountID) {
-        setFocusState((prev) => ({ ...prev, manuallyExpanded: true }));
-      } else {
-        toggleStoredCollapsed();
-      }
-    }
+    if (collapsed) toggleStoredCollapsed();
     if (!groupsOpen) toggleGroups();
   };
 

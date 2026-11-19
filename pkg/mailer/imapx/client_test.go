@@ -351,6 +351,39 @@ func TestMarkRead(t *testing.T) {
 
 // 删除必须是「打 \Deleted + EXPUNGE」两步。只打标记的话邮件还在，
 // 用户会以为没删掉。
+// 未读检查只数收件箱;「全部标已读」必须覆盖所有可选文件夹,
+// 空文件夹也不能因为 STORE 1:* 报错。
+func TestUnreadCountAndMarkAllRead(t *testing.T) {
+	ts := newTestServer(t, map[string][]string{
+		"INBOX":   {makeMessage("a", "1"), makeMessage("b", "2")},
+		"Sent":    {makeMessage("c", "3")},
+		"Archive": nil,
+	})
+	client := ts.client()
+	cred := testCred()
+
+	count, err := client.UnreadCount(context.Background(), cred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("收件箱未读数 = %d,期望 2", count)
+	}
+
+	if err := client.MarkAllRead(context.Background(), cred); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"INBOX", "Sent"} {
+		data, err := ts.user.Status(name, &imap.StatusOptions{NumUnseen: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if data.NumUnseen != nil && *data.NumUnseen != 0 {
+			t.Errorf("%s 还有 %d 封未读", name, *data.NumUnseen)
+		}
+	}
+}
+
 func TestDeleteExpunges(t *testing.T) {
 	ts := newTestServer(t, map[string][]string{
 		"INBOX": {makeMessage("keep", "1"), makeMessage("remove", "2")},

@@ -63,6 +63,9 @@ export interface MailAccount {
   health_error_kind: string;
   health_error: string;
   health_checked_at: string | null;
+  // 收信检查得到的收件箱未读数,不是实时值:只有刷新任务跑过才更新。
+  unread_count: number;
+  unread_checked_at: string | null;
   created_at: string;
   updated_at: string;
   has_password: boolean;
@@ -348,7 +351,7 @@ export const mailApi = {
   messages: async (
     tenantID: TenantRef,
     accountID: string,
-    params: { folder: MailFolder; skip?: number; top?: number },
+    params: { folder: MailFolder; skip?: number; top?: number; refresh?: boolean },
   ) =>
     (
       await client.get<ApiResponse<MessageListResponse>>(messageBase(tenantID, accountID), {

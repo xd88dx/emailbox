@@ -26,6 +26,8 @@ type Config struct {
 	OnTokenRefresh func(email, refreshToken string)
 	// DialFunc 供测试注入进程内的 IMAP 服务器。留空时按代理配置真实拨号。
 	DialFunc func(ctx context.Context, host string, port int, proxyURL string) (net.Conn, error)
+	// TLSLegacy 打开静态 RSA 套件,用于只支持旧式 TLS 的服务商(如新浪 993)。
+	TLSLegacy bool
 }
 
 // Client 是 IMAP 通道的实现。
@@ -134,7 +136,7 @@ func (c *Client) dial(ctx context.Context, host string, port int, proxyURL strin
 	if err != nil {
 		return nil, err
 	}
-	return mailer.DialTLS(ctx, dialer, host, port)
+	return mailer.DialTLSWith(ctx, dialer, host, port, mailer.TLSOptions{LegacyCiphers: c.cfg.TLSLegacy})
 }
 
 // identify 发送 IMAP ID 命令。

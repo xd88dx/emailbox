@@ -9,6 +9,10 @@ import "time"
 const (
 	JobTypeTokenRefresh = "token_refresh"
 	JobTypeAccountCheck = "account_check"
+	// 收信检查与批量已读都会打上游,但只查未读元数据、不下发邮件内容。
+	// 两者互斥:同时跑会让同一批账号的请求量翻倍。
+	JobTypeUnreadCheck = "unread_check"
+	JobTypeMarkRead    = "mark_read"
 )
 
 // 任务触发方式。

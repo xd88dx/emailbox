@@ -1,6 +1,6 @@
 import { Button } from "@cloudflare/kumo/components/button";
 import { ArrowsIn, ArrowsOut, Copy, X } from "@phosphor-icons/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   mailApi,
   type Message,
@@ -10,6 +10,8 @@ import {
 } from "@/api/mail";
 import { AttachmentList } from "./AttachmentList";
 import { MessageBody } from "./MessageBody";
+import { VerificationCodeChip } from "./VerificationCodeChip";
+import { findVerificationCode } from "./verificationCode";
 import { refKey, toRef } from "./messageRef";
 
 interface MessageDetailProps {
@@ -35,6 +37,31 @@ const loadingState = (key: string): DetailState => ({
   error: "",
 });
 
+// 详情在浏览器里缓存几分钟:在两封信之间来回对比验证码时,
+// 每次都重新走一遍上游既慢又白扣取件额度。正文是不可变的,缓存很安全;
+// 只保留最近 60 封,避免长时间使用后内存一直涨。
+const DETAIL_TTL_MS = 5 * 60 * 1000;
+const DETAIL_CACHE_MAX = 60;
+const detailCache = new Map<string, { detail: Detail; expiresAt: number }>();
+
+function cachedDetail(key: string): Detail | null {
+  const entry = detailCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    detailCache.delete(key);
+    return null;
+  }
+  return entry.detail;
+}
+
+function rememberDetail(key: string, detail: Detail) {
+  if (detailCache.size >= DETAIL_CACHE_MAX) {
+    const oldest = detailCache.keys().next().value;
+    if (oldest) detailCache.delete(oldest);
+  }
+  detailCache.set(key, { detail, expiresAt: Date.now() + DETAIL_TTL_MS });
+}
+
 export function MessageDetail({ tenantID, accountID, message, onClose }: MessageDetailProps) {
   const [fullscreen, setFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -49,11 +76,13 @@ export function MessageDetail({ tenantID, accountID, message, onClose }: Message
   // 否则会有一帧把上一封信的正文挂在新主题下面。
   let view = state;
   if (state.key !== key) {
-    view = loadingState(key);
+    const cached = cachedDetail(key);
+    view = cached ? { key, detail: cached, loading: false, error: "" } : loadingState(key);
     setState(view);
   }
 
   useEffect(() => {
+    if (view.detail) return undefined;
     let ignore = false;
     void (async () => {
       try {
@@ -62,6 +91,7 @@ export function MessageDetail({ tenantID, accountID, message, onClose }: Message
           id_mode: idMode,
         });
         if (ignore) return;
+        rememberDetail(key, resp.data);
         setState((prev) =>
           prev.key === key ? { ...prev, detail: resp.data, loading: false } : prev,
         );
@@ -74,7 +104,7 @@ export function MessageDetail({ tenantID, accountID, message, onClose }: Message
     return () => {
       ignore = true;
     };
-  }, [key, tenantID, accountID, messageID, idMode, folder]);
+  }, [key, tenantID, accountID, messageID, idMode, folder, view.detail]);
 
   // 全屏时 Esc 退出。这是全屏阅读唯一的出口，不给的话用户只能去点右上角。
   useEffect(() => {
@@ -92,6 +122,18 @@ export function MessageDetail({ tenantID, accountID, message, onClose }: Message
   }, [onClose]);
 
   const detail = view.detail;
+  // 主题优先,其次正文。正文先转纯文本再找,避免从 HTML 标签/属性里误抓数字。
+  const code = useMemo(
+    () =>
+      detail
+        ? findVerificationCode(
+            detail.subject,
+            message.subject,
+            textForCode(detail.body, detail.body_type),
+          )
+        : findVerificationCode(message.subject),
+    [detail, message.subject],
+  );
 
   const copyBody = useCallback(async () => {
     if (!detail) return;
@@ -158,6 +200,7 @@ export function MessageDetail({ tenantID, accountID, message, onClose }: Message
           <Button size="sm" variant="secondary" icon={Copy} onClick={() => void copyBody()}>
             {copied ? "已复制" : "复制正文"}
           </Button>
+          {code && <VerificationCodeChip code={code} />}
         </div>
       )}
 
@@ -184,6 +227,14 @@ function MetaRow({ label, value }: { label: string; value: string }) {
       <dd className="min-w-0 flex-1 truncate text-kumo-default">{value}</dd>
     </div>
   );
+}
+
+// textForCode 是只为「找验证码」服务的轻量纯文本化。
+// 这里不要求排版准确,把标签换成空格即可;用 DOMParser 会把一份可能
+// 几百 KB 的邮件正文重新解析一遍,而这段代码会随每次详情渲染执行。
+function textForCode(body: string, bodyType: string): string {
+  if (bodyType !== "html") return body;
+  return body.replace(/<[^>]*>/g, " ");
 }
 
 // plainText 把邮件正文转成可复制的纯文本。

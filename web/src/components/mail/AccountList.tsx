@@ -7,6 +7,7 @@ import { PencilSimple, Tray } from "@phosphor-icons/react";
 import type { AccountStatus, MailAccount } from "@/api/mail";
 import { useSelectionStore } from "@/store/selectionStore";
 import { EmptyState } from "./EmptyState";
+import { StatusDot } from "./StatusDot";
 import { VirtualList } from "./VirtualList";
 
 const STATUS_LABEL: Record<AccountStatus, { label: string; variant: string }> = {
@@ -28,7 +29,6 @@ const STATUS_LABEL: Record<AccountStatus, { label: string; variant: string }> = 
 const COLUMNS_NARROW = "grid-cols-[2.5rem_minmax(0,1fr)_5rem_5rem_2.25rem]";
 const COLUMNS_WIDE = "@3xl:grid-cols-[2.5rem_minmax(0,1fr)_7rem_5rem_5rem_2.25rem]";
 const GRID = `grid items-center gap-2 ${COLUMNS_NARROW} ${COLUMNS_WIDE}`;
-const COMPACT_GRID = "grid items-center gap-1 grid-cols-[2.25rem_minmax(0,1fr)_2.25rem]";
 // 次要列：窄的时候整格不渲染，列数才和上面的模板对得上。
 const SECONDARY_CELL = "hidden @3xl:flex";
 const ROW_HEIGHT = 44;
@@ -48,7 +48,6 @@ interface AccountListProps {
   total: number;
   onPageChange: (page: number) => void;
   onPerPageChange: (perPage: number) => void;
-  compact?: boolean;
 }
 
 export function AccountList({
@@ -62,7 +61,6 @@ export function AccountList({
   total,
   onPageChange,
   onPerPageChange,
-  compact = false,
 }: AccountListProps) {
   const selected = useSelectionStore((s) => s.selected);
   const selectPage = useSelectionStore((s) => s.selectPage);
@@ -70,7 +68,6 @@ export function AccountList({
 
   const pageIDs = accounts.map((a) => a.id);
   const allOnPageSelected = pageIDs.length > 0 && pageIDs.every((id) => selected.has(id));
-  const grid = compact ? COMPACT_GRID : GRID;
 
   if (loading) {
     return <p className="p-6 text-sm text-kumo-subtle">加载中…</p>;
@@ -81,7 +78,7 @@ export function AccountList({
     // 后者是兜底——任何列宽算错都只会在本栏内被裁掉，不会再画到相邻面板上。
     <div className="@container flex min-h-0 flex-1 flex-col overflow-hidden">
       <div
-        className={`${grid} shrink-0 border-b border-kumo-line px-2 py-2 text-xs text-kumo-subtle`}
+        className={`${GRID} shrink-0 border-b border-kumo-line px-2 py-2 text-xs text-kumo-subtle`}
       >
         <Checkbox
           checked={allOnPageSelected}
@@ -89,13 +86,9 @@ export function AccountList({
           aria-label="全选当前页"
         />
         <span className="font-medium">邮箱</span>
-        {!compact && (
-          <>
-            <span className={`${SECONDARY_CELL} font-medium`}>服务商</span>
-            <span className="font-medium">状态</span>
-            <span className="font-medium">令牌</span>
-          </>
-        )}
+        <span className={`${SECONDARY_CELL} font-medium`}>服务商</span>
+        <span className="font-medium">状态</span>
+        <span className="font-medium">令牌</span>
         <span className="sr-only">操作</span>
       </div>
 
@@ -103,7 +96,7 @@ export function AccountList({
         <EmptyState
           icon={Tray}
           title="暂无符合条件的邮箱账号"
-          description="点击工具栏中的「导入邮箱」添加账号凭据，或调整当前筛选条件。"
+          description="点击工具栏中的「导入」添加账号凭据，或调整当前筛选条件。"
         />
       ) : (
         <VirtualList
@@ -116,7 +109,6 @@ export function AccountList({
               active={account.id === activeID}
               onSelect={onSelect}
               onEdit={onEdit}
-              compact={compact}
             />
           )}
         />
@@ -167,13 +159,11 @@ function AccountRow({
   active,
   onSelect,
   onEdit,
-  compact,
 }: {
   account: MailAccount;
   active: boolean;
   onSelect: (account: MailAccount) => void;
   onEdit: (account: MailAccount) => void;
-  compact: boolean;
 }) {
   // 只订阅这一行的选中状态，避免勾选任何一行都让整张列表重渲染。
   const checked = useSelectionStore((s) => s.selected.has(account.id));
@@ -181,8 +171,8 @@ function AccountRow({
 
   return (
     <div
-      className={`${compact ? COMPACT_GRID : GRID} border-b border-kumo-hairline px-2 text-sm ${
-        active ? "bg-kumo-interact" : "hover:bg-kumo-interact"
+      className={`${GRID} border-b border-kumo-hairline px-2 text-sm ${
+        active ? "bg-ebx-row-active" : "hover:bg-ebx-row-active"
       }`}
       style={{ height: ROW_HEIGHT }}
     >
@@ -204,21 +194,28 @@ function AccountRow({
         >
           {account.email}
         </button>
-        {!compact && account.aliases.length > 0 && (
+        {account.aliases.length > 0 && (
           <span className="ml-2 shrink-0 text-xs text-kumo-subtle">
             +{account.aliases.length} 别名
           </span>
         )}
-      </div>
-      {!compact && (
-        <>
-          <span className={`${SECONDARY_CELL} truncate text-kumo-subtle`}>{account.provider}</span>
-          <span>
-            <StatusBadge account={account} />
+        {account.unread_count > 0 && (
+          // 未读数是收信检查的缓存值,不是实时读:title 里不说「当前」,
+          // 免得用户以为它随邮件的到达即时变化。
+          <span
+            className="ml-2 flex shrink-0 items-center gap-1 text-xs font-medium text-kumo-link tabular-nums"
+            title="最近一次收信检查发现的收件箱未读数"
+          >
+            <StatusDot tone="unread" label={`${account.unread_count} 封未读`} />
+            {account.unread_count > 99 ? "99+" : account.unread_count}
           </span>
-          <RefreshCell account={account} />
-        </>
-      )}
+        )}
+      </div>
+      <span className={`${SECONDARY_CELL} truncate text-kumo-subtle`}>{account.provider}</span>
+      <span>
+        <StatusBadge account={account} />
+      </span>
+      <RefreshCell account={account} />
       <Button
         shape="square"
         size="sm"

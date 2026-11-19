@@ -2,6 +2,7 @@ package mailer
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -31,6 +32,29 @@ type failingDialer struct{ err error }
 
 func (d failingDialer) DialContext(context.Context, string, string) (net.Conn, error) {
 	return nil, d.err
+}
+
+func TestLegacyCipherSuitesKeepModernSuites(t *testing.T) {
+	// 显式设置 CipherSuites 会整体替换默认值:漏掉 ECDHE 会让原本正常的服务器也连不上。
+	required := []uint16{
+		tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+		tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+		tls.TLS_RSA_WITH_AES_128_CBC_SHA,
+		tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+		tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+	}
+	seen := make(map[uint16]bool)
+	for _, id := range LegacyCipherSuites() {
+		if seen[id] {
+			t.Errorf("套件 %#x 重复列出", id)
+		}
+		seen[id] = true
+	}
+	for _, id := range required {
+		if !seen[id] {
+			t.Errorf("缺少套件 %#x", id)
+		}
+	}
 }
 
 func TestDialTLSKeepsProxyAuthenticationFailure(t *testing.T) {

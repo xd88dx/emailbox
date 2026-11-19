@@ -227,6 +227,17 @@ func NewHTTPClient(proxyURL string, timeout time.Duration) (*http.Client, error)
 
 // DialTLS 通过给定 dialer 建立 TLS 连接，供 IMAP 使用。
 func DialTLS(ctx context.Context, dialer Dialer, host string, port int) (net.Conn, error) {
+	return DialTLSWith(ctx, dialer, host, port, TLSOptions{})
+}
+
+// TLSOptions 是 IMAP TLS 的兼容性选项。
+type TLSOptions struct {
+	// LegacyCiphers 显式启用静态 RSA 套件。
+	LegacyCiphers bool
+}
+
+// DialTLSWith 与 DialTLS 相同,但允许打开旧式套件。
+func DialTLSWith(ctx context.Context, dialer Dialer, host string, port int, opt TLSOptions) (net.Conn, error) {
 	address := net.JoinHostPort(host, fmt.Sprint(port))
 	conn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
@@ -237,10 +248,39 @@ func DialTLS(ctx context.Context, dialer Dialer, host string, port int) (net.Con
 	}
 	// ServerName 必须显式设置：经 SOCKS5 拨号时对端地址是代理，
 	// 不设的话 TLS 会拿代理地址去校验证书而失败。
-	tlsConn := tls.Client(conn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+	cfg := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
+	if opt.LegacyCiphers {
+		cfg.CipherSuites = LegacyCipherSuites()
+	}
+	tlsConn := tls.Client(conn, cfg)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
-		return nil, newError(ErrKindNetwork, "", "与 "+host+" 的 TLS 握手失败", err)
+		message := "与 " + host + " 的 TLS 握手失败"
+		if !opt.LegacyCiphers {
+			message += ";若该服务商只支持旧式套件(静态 RSA),设置 IMAP_TLS_LEGACY=true 后重试"
+		}
+		return nil, newError(ErrKindTLSHandshake, "", message, err)
 	}
 	return tlsConn, nil
+}
+
+// LegacyCipherSuites 返回「默认套件 + 静态 RSA」的完整列表。
+//
+// 必须把默认套件一起列出:Config.CipherSuites 一旦非空就完全替换默认值,
+// 只写 RSA 会让原本能连的 ECDHE 服务器也握手失败。
+//
+// 静态 RSA 从 Go 1.22 起默认禁用,Go 1.27 又移除了 tlsrsakex 开关,但实现仍在;
+// 标准库源码写明这些套件「not used unless explicitly listed」。
+// 注意 Go 没有 FFDHE 实现,只支持 DHE 的服务器仍然连不上。
+func LegacyCipherSuites() []uint16 {
+	suites := make([]uint16, 0, 32)
+	for _, cs := range tls.CipherSuites() {
+		suites = append(suites, cs.ID)
+	}
+	return append(suites,
+		tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+		tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+		tls.TLS_RSA_WITH_AES_128_CBC_SHA,
+		tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+	)
 }

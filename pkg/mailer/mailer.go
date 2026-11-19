@@ -137,6 +137,22 @@ type TokenRefresher interface {
 	RefreshToken(ctx context.Context, cred Credential) error
 }
 
+// UnreadCounter 查询收件箱未读数。
+//
+// 独立于 Client:它只需要一条元数据命令,不应强迫所有测试桩与通道都实现。
+// Graph 与 IMAP 都实现了它,Chain 负责按通道转发。
+type UnreadCounter interface {
+	UnreadCount(ctx context.Context, cred Credential) (int, error)
+}
+
+// AllReadMarker 把一个账号所有文件夹里的邮件标为已读。
+//
+// 「所有文件夹」由实现负责展开:IMAP 逐个 SELECT 后 STORE,Graph 按
+// mailFolders 分页取未读再批量 PATCH。
+type AllReadMarker interface {
+	MarkAllRead(ctx context.Context, cred Credential) error
+}
+
 // Client 是一个邮件通道。imapx 按认证方式构造不同通道，chain 负责回退。
 //
 // 所有方法都收 context：超时由 service 层用 OverallTimeout 统一控制。

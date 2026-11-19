@@ -271,6 +271,9 @@ type Querier interface {
 	// Microsoft rotates refresh tokens. Missing a rotation breaks the account on
 	// the next refresh, so this must be its own statement that cannot be skipped.
 	UpdateMailAccountRefreshToken(ctx context.Context, arg UpdateMailAccountRefreshTokenParams) (int64, error)
+	// Unread check writes only its own two columns: a full-row update would
+	// overwrite a group/remark/proxy change the user is editing at the same time.
+	UpdateMailAccountUnread(ctx context.Context, arg UpdateMailAccountUnreadParams) (int64, error)
 	UpdateMailGroup(ctx context.Context, arg UpdateMailGroupParams) (int64, error)
 	UpdateMailGroupSchedule(ctx context.Context, arg UpdateMailGroupScheduleParams) (int64, error)
 	UpdateMailGroupSort(ctx context.Context, arg UpdateMailGroupSortParams) error

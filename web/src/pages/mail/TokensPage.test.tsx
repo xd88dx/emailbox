@@ -28,6 +28,8 @@ function account(id: string, errorKind: string, error: string): MailAccount {
     health_error_kind: "",
     health_error: "",
     health_checked_at: null,
+    unread_count: 0,
+    unread_checked_at: null,
     created_at: "",
     updated_at: "",
     has_password: false,

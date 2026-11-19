@@ -184,11 +184,31 @@ JOB_WORKERS=8
 JOB_ACCOUNT_DELAY_MS=0
 # job_events 的保留天数，超期的在启动时清理
 JOB_EVENT_RETENTION_DAYS=7
+# 收信检查与批量已读:同一服务商的最大并发、每秒请求数
+JOB_PROVIDER_CONCURRENCY=2
+JOB_PROVIDER_RATE=2
 ```
 
 默认值按「5000 个账号、单账号约 1.5 秒」估算：8 并发约 16 分钟跑完。
 **调大并发时要同时调大 `JOB_ACCOUNT_DELAY_MS`**——批量刷新是最容易触发服务商风控的操作，
 而风控的代价是用户的账号被封，比慢几分钟严重得多。
+
+## IMAP TLS 兼容
+
+```env
+# 打开后 TLS1.2 套件 = 默认 ECDHE + 静态 RSA
+IMAP_TLS_LEGACY=false
+```
+
+部分服务商的 IMAP 只接受静态 RSA 或 DHE。静态 RSA 从 Go 1.22 起默认禁用,
+Go 1.27 又移除了 `tlsrsakex` 兼容开关(但实现仍在,显式配置套件即可启用),
+因此这类服务器在默认配置下会握手失败,报 `tls_handshake`。打开本开关后,
+TLS1.2 的套件列表会额外包含 `TLS_RSA_WITH_*` 四条,同时保留默认的 ECDHE 套件。
+
+实测新浪邮箱 `993` 在 `TLS1.2 + AES128-GCM-SHA256`(静态 RSA)下可正常建连。
+
+注意:**Go 标准库没有 FFDHE 实现**,只支持 DHE 的服务器无法通过本开关解决,
+需要换 TLS 实现(如 OpenSSL 绑定),属于当前版本不支持的范围。
 
 ## Waffo 订阅支付
 

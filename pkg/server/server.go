@@ -146,6 +146,7 @@ func buildServices(store *repo.Store, desktop bool) (*services, error) {
 	messageService := service.NewMessageService(store, cipher, quotaService, service.ChainOptions{
 		OAuthClientID: configs.AppConfig.OAuth.Microsoft.ClientID, OAuthClientSecret: configs.AppConfig.OAuth.Microsoft.ClientSecret,
 		GoogleOAuthClientID: configs.AppConfig.OAuth.Google.ClientID, GoogleOAuthClientSecret: configs.AppConfig.OAuth.Google.ClientSecret,
+		TLSLegacy: configs.AppConfig.Mailer.TLSLegacy,
 	})
 	oauthService := service.NewOAuthService(store, cipher, quotaService, messageService, service.OAuthOptions{
 		Microsoft: service.OAuthProviderOptions{Enabled: configs.AppConfig.OAuth.Microsoft.Enabled, ClientID: configs.AppConfig.OAuth.Microsoft.ClientID,
@@ -170,6 +171,14 @@ func buildServices(store *repo.Store, desktop bool) (*services, error) {
 	jobManager.Register(refreshService)
 	healthService := service.NewHealthService(store, messageService, jobManager)
 	jobManager.Register(healthService)
+	// 收信检查与批量已读共享同一份按服务商限流:两者互斥,
+	// 共享一份闸门就等于对整个租户的批量上游请求做了统一约束。
+	mailThrottle := service.NewMailJobThrottle(
+		configs.AppConfig.Job.ProviderConcurrency, configs.AppConfig.Job.ProviderRatePerSec)
+	unreadService := service.NewUnreadService(store, messageService, jobManager, mailThrottle)
+	jobManager.Register(unreadService)
+	markReadService := service.NewMarkReadService(store, messageService, jobManager, mailThrottle)
+	jobManager.Register(markReadService)
 
 	// 强杀留下的 running 任务在这里被认出来并标为 interrupted。
 	// 不做这一步的话，前端的进度条会对着一个永远不动的任务一直转。
@@ -199,6 +208,7 @@ func buildServices(store *repo.Store, desktop bool) (*services, error) {
 			Job:     handler.NewJobHandler(service.NewJobService(store, jobManager), refreshService),
 			Refresh: handler.NewRefreshHandler(refreshService),
 			Health:  handler.NewHealthHandler(healthService),
+			MailJob: handler.NewMailJobHandler(unreadService, markReadService),
 			OAuth:   handler.NewOAuthHandler(oauthService, configs.AppConfig.OAuth.ReturnURL),
 		},
 		authMW:     middleware2.NewAuthMiddleware(authService, apiKeyService),

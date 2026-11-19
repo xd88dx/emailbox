@@ -45,8 +45,10 @@ func (h *MessageHandler) List(c *echo.Context) error {
 		Skip:   atoiOrZero(q.Get("skip")),
 		Top:    atoiOrZero(q.Get("top")),
 	}
+	refresh := q.Get("refresh")
+	force := refresh == "1" || refresh == "true"
 	result, err := h.service.List(c.Request().Context(),
-		c.Param("tenantID"), c.Param("accountID"), opt)
+		c.Param("tenantID"), c.Param("accountID"), opt, force)
 	if err != nil {
 		return mailError(c, err)
 	}

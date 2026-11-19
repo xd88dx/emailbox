@@ -9,6 +9,7 @@ export const ERROR_KIND_LABEL: Record<string, string> = {
   consent_required: "权限不足",
   proxy_failed: "代理不可用",
   network: "网络不可达",
+  tls_handshake: "TLS 握手失败",
   rate_limited: "被限流",
   folder_unavailable: "邮箱文件夹不可用",
   provider_error: "服务商或应用配置错误",

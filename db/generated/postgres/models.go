@@ -117,6 +117,8 @@ type MailAccount struct {
 	HealthErrorKind       string
 	HealthError           string
 	HealthCheckedAt       sql.NullTime
+	UnreadCount           int32
+	UnreadCheckedAt       sql.NullTime
 }
 
 type MailAccountAlias struct {

@@ -115,7 +115,7 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg(q)::text IS NULL
        OR strpos(email_normalized, sqlc.narg(q)::text) > 0
        OR strpos(lower(remark), sqlc.narg(q)::text) > 0)
-ORDER BY sort_order ASC, id
+ORDER BY (unread_count > 0) DESC, sort_order ASC, id
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
 -- name: ListMailAccountsPageBySortOrderDesc :many
@@ -130,7 +130,7 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg(q)::text IS NULL
        OR strpos(email_normalized, sqlc.narg(q)::text) > 0
        OR strpos(lower(remark), sqlc.narg(q)::text) > 0)
-ORDER BY sort_order DESC, id
+ORDER BY (unread_count > 0) DESC, sort_order DESC, id
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
 -- name: ListMailAccountsPageByEmailAsc :many
@@ -145,7 +145,7 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg(q)::text IS NULL
        OR strpos(email_normalized, sqlc.narg(q)::text) > 0
        OR strpos(lower(remark), sqlc.narg(q)::text) > 0)
-ORDER BY email_normalized ASC, id
+ORDER BY (unread_count > 0) DESC, email_normalized ASC, id
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
 -- name: ListMailAccountsPageByEmailDesc :many
@@ -160,7 +160,7 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg(q)::text IS NULL
        OR strpos(email_normalized, sqlc.narg(q)::text) > 0
        OR strpos(lower(remark), sqlc.narg(q)::text) > 0)
-ORDER BY email_normalized DESC, id
+ORDER BY (unread_count > 0) DESC, email_normalized DESC, id
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
 -- name: ListMailAccountsPageByCreatedAtAsc :many
@@ -175,7 +175,7 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg(q)::text IS NULL
        OR strpos(email_normalized, sqlc.narg(q)::text) > 0
        OR strpos(lower(remark), sqlc.narg(q)::text) > 0)
-ORDER BY created_at ASC, id
+ORDER BY (unread_count > 0) DESC, created_at ASC, id
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
 -- name: ListMailAccountsPageByCreatedAtDesc :many
@@ -190,7 +190,7 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg(q)::text IS NULL
        OR strpos(email_normalized, sqlc.narg(q)::text) > 0
        OR strpos(lower(remark), sqlc.narg(q)::text) > 0)
-ORDER BY created_at DESC, id
+ORDER BY (unread_count > 0) DESC, created_at DESC, id
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
 -- name: ListMailAccountsPageByLastRefreshAtAsc :many
@@ -205,7 +205,7 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg(q)::text IS NULL
        OR strpos(email_normalized, sqlc.narg(q)::text) > 0
        OR strpos(lower(remark), sqlc.narg(q)::text) > 0)
-ORDER BY last_refresh_at ASC, id
+ORDER BY (unread_count > 0) DESC, last_refresh_at ASC, id
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
 -- name: ListMailAccountsPageByLastRefreshAtDesc :many
@@ -220,7 +220,7 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg(q)::text IS NULL
        OR strpos(email_normalized, sqlc.narg(q)::text) > 0
        OR strpos(lower(remark), sqlc.narg(q)::text) > 0)
-ORDER BY last_refresh_at DESC, id
+ORDER BY (unread_count > 0) DESC, last_refresh_at DESC, id
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
 -- Hot path: clicking a group in the left pane. Skips every optional clause so
@@ -331,3 +331,12 @@ SET last_refresh_at = CURRENT_TIMESTAMP,
     health_checked_at = CURRENT_TIMESTAMP,
     updated_at = CURRENT_TIMESTAMP
 WHERE tenant_id = $7 AND id = $8 AND deleted_at IS NULL;
+
+-- Unread check writes only its own two columns: a full-row update would
+-- overwrite a group/remark/proxy change the user is editing at the same time.
+-- name: UpdateMailAccountUnread :execrows
+UPDATE mail_accounts
+SET unread_count = $1,
+    unread_checked_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE tenant_id = $2 AND id = $3 AND deleted_at IS NULL;

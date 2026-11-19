@@ -1,15 +1,20 @@
 import { Button, LinkButton } from "@cloudflare/kumo/components/button";
 import {
   ArrowsClockwise,
+  CircleNotch,
   Download,
+  EnvelopeOpen,
   Prohibit,
   Trash,
   Upload,
   CheckCircle,
+  type IconProps,
 } from "@phosphor-icons/react";
-import { useMemo } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
+import { isTerminal, jobApi } from "@/api/jobs";
 import { mailApi, type TenantRef } from "@/api/mail";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { useJobStore } from "@/store/jobStore";
 import { useSelectionStore } from "@/store/selectionStore";
 
 // 全局动作条。把原先散在筛选栏（导入/导出/刷新）和 AccountBatchMenu（停用/启用/删除）
@@ -28,6 +33,16 @@ interface MailToolbarProps {
   onExport: () => void;
 }
 
+// 用 forwardRef 保持与 Phosphor 图标同一个类型,Kumo 的 icon prop 只接受图标组件。
+const SpinningCircle = forwardRef<SVGSVGElement, IconProps>((props, ref) => (
+  <CircleNotch
+    {...props}
+    ref={ref}
+    className={["animate-spin", props.className].filter(Boolean).join(" ")}
+  />
+));
+SpinningCircle.displayName = "SpinningCircle";
+
 export function MailToolbar({ tenantID, onReload, onExport }: MailToolbarProps) {
   // 稳定引用：取回 Set 再 useMemo 成数组。直接在选择器里 Array.from
   // 会让 zustand v5 的快照每次都不同，进而无限重渲染（AGENTS.md §6.3）。
@@ -37,6 +52,55 @@ export function MailToolbar({ tenantID, onReload, onExport }: MailToolbarProps) 
   const { error, pending, run } = useAsyncAction();
 
   const none = ids.length === 0;
+
+  // 本页提交的任务。jobStore 是全局共享的,只有 jobID 对得上时才把进度
+  // 显示在这两个按钮上——否则从 Token 页带回来的刷新任务会串到收信按钮上。
+  const job = useJobStore();
+  const [ownJob, setOwnJob] = useState<{ id: string; kind: "unread" | "read" } | null>(null);
+  const reloadedRef = useRef<string | null>(null);
+  const active = Boolean(
+    ownJob && job.jobID === ownJob.id && !(job.status && isTerminal(job.status)),
+  );
+
+  useEffect(() => {
+    if (!ownJob || job.jobID !== ownJob.id) return;
+    if (!job.status || !isTerminal(job.status)) return;
+    if (reloadedRef.current === ownJob.id) return;
+    reloadedRef.current = ownJob.id;
+    onReload();
+  }, [job.status, job.jobID, ownJob, onReload]);
+
+  const startJob = (id: string, kind: "unread" | "read") => {
+    useJobStore.getState().watch(tenantID, id, kind === "unread" ? "unread_check" : "mark_read");
+    setOwnJob({ id, kind });
+    onReload();
+  };
+
+  const submitUnread = () =>
+    void run(async () => {
+      const resp = await jobApi.submitUnreadCheck(tenantID, { scope: "all" });
+      startJob(resp.data.id, "unread");
+    });
+
+  const submitMarkRead = () =>
+    void run(async () => {
+      const resp = await jobApi.submitMarkRead(tenantID, ids);
+      startJob(resp.data.id, "read");
+      clear();
+    });
+
+  const stopJob = () =>
+    void run(async () => {
+      if (ownJob) await jobApi.stop(tenantID, ownJob.id);
+    });
+
+  const runningUnread = active && ownJob?.kind === "unread";
+  const runningRead = active && ownJob?.kind === "read";
+  const refreshLabel =
+    job.progress.total > 0 ? `${job.progress.done}/${job.progress.total}` : "检查中";
+  const refreshPercent =
+    job.progress.total > 0 ? Math.min(100, (job.progress.done / job.progress.total) * 100) : 0;
+  const readPercent = refreshPercent;
   const act = (fn: () => Promise<unknown>) =>
     void run(async () => {
       await fn();
@@ -47,17 +111,63 @@ export function MailToolbar({ tenantID, onReload, onExport }: MailToolbarProps) 
   return (
     <div className="flex h-(--ebx-toolbar-h) shrink-0 items-center gap-2 overflow-x-auto border-b border-kumo-line px-4">
       <LinkButton href="/mail/import" variant="secondary" icon={Upload}>
-        导入邮箱
+        导入
       </LinkButton>
       <Button variant="secondary" icon={Download} onClick={onExport}>
         导出
       </Button>
-      <Button variant="secondary" icon={ArrowsClockwise} onClick={onReload}>
-        刷新
-      </Button>
+      {/* 进度直接画在按钮上:再放一个「停止」按钮会让工具栏宽度在任务开始/结束时跳一次。
+          运行中按钮本身就是停止入口,图标和 title 都提示这一点。
+          标签用固定宽度,避免「刷新」与「12/50」把相邻按钮挤来挤去。 */}
+      <div
+        className="relative shrink-0"
+        title={runningUnread ? "点击停止检查" : "检查各邮箱的未读数"}
+      >
+        <Button
+          variant="secondary"
+          icon={runningUnread ? SpinningCircle : ArrowsClockwise}
+          disabled={pending || (active && !runningUnread)}
+          onClick={runningUnread ? stopJob : submitUnread}
+        >
+          <span className="inline-block min-w-16 text-center tabular-nums">
+            {runningUnread ? refreshLabel : "刷新"}
+          </span>
+        </Button>
+        {runningUnread && (
+          <span className="pointer-events-none absolute inset-x-1.5 bottom-1 h-0.5 overflow-hidden rounded-full bg-kumo-tint">
+            <span
+              className="block h-full bg-kumo-link transition-[width] duration-300"
+              style={{ width: `${refreshPercent}%` }}
+            />
+          </span>
+        )}
+      </div>
 
-      <span className="mx-1 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
+      <span className="mx-2 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
 
+      {/* 与「刷新」同一套逻辑:进度画在按钮内部,再点一次就是停止。
+          标签固定为「已读」,只换图标,宽度不随进度变化,免得整排按钮跟着挪。 */}
+      <div
+        className="relative shrink-0"
+        title={runningRead ? "点击停止标记已读" : "把选中邮箱的所有邮件标为已读"}
+      >
+        <Button
+          variant="secondary"
+          icon={runningRead ? SpinningCircle : EnvelopeOpen}
+          disabled={pending || (active && !runningRead) || (none && !runningRead)}
+          onClick={runningRead ? stopJob : submitMarkRead}
+        >
+          已读
+        </Button>
+        {runningRead && (
+          <span className="pointer-events-none absolute inset-x-1.5 bottom-1 h-0.5 overflow-hidden rounded-full bg-kumo-tint">
+            <span
+              className="block h-full bg-kumo-link transition-[width] duration-300"
+              style={{ width: `${readPercent}%` }}
+            />
+          </span>
+        )}
+      </div>
       <Button
         variant="secondary"
         icon={CheckCircle}

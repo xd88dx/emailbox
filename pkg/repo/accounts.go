@@ -262,6 +262,7 @@ func mapSQLiteAccount(a sqlitedb.MailAccount) *model.MailAccount {
 		RefreshTokenUpdatedAt: timePtr(a.RefreshTokenUpdatedAt),
 		HealthStatus:          model.HealthStatus(a.HealthStatus), HealthErrorKind: a.HealthErrorKind,
 		HealthError: a.HealthError, HealthCheckedAt: timePtr(a.HealthCheckedAt),
+		UnreadCount: int(a.UnreadCount), UnreadCheckedAt: timePtr(a.UnreadCheckedAt),
 		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, DeletedAt: timePtr(a.DeletedAt),
 	}
 }
@@ -281,6 +282,7 @@ func mapPostgresAccount(a postgresdb.MailAccount) *model.MailAccount {
 		RefreshTokenUpdatedAt: timePtr(a.RefreshTokenUpdatedAt),
 		HealthStatus:          model.HealthStatus(a.HealthStatus), HealthErrorKind: a.HealthErrorKind,
 		HealthError: a.HealthError, HealthCheckedAt: timePtr(a.HealthCheckedAt),
+		UnreadCount: int(a.UnreadCount), UnreadCheckedAt: timePtr(a.UnreadCheckedAt),
 		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, DeletedAt: timePtr(a.DeletedAt),
 	}
 }
@@ -334,6 +336,25 @@ func (s *Store) UpdateMailAccountRefreshResult(ctx context.Context, tenantID, id
 		n, e = s.postgres.UpdateMailAccountRefreshResult(ctx, postgresdb.UpdateMailAccountRefreshResultParams{
 			LastRefreshStatus: status, LastRefreshError: errMessage, LastRefreshErrorKind: errorKind,
 			TenantID: tenantID, ID: id,
+		})
+	}
+	return rowsAffected(n, e)
+}
+
+// UpdateMailAccountUnread 写回收信检查得到的未读数。
+//
+// 标记已读之后也用它清零。同样是窄更新:整行改写会把用户正在编辑的
+// 分组、备注、代理一起覆盖掉。
+func (s *Store) UpdateMailAccountUnread(ctx context.Context, tenantID, id string, count int) error {
+	var n int64
+	var e error
+	if s.driver == "sqlite" {
+		n, e = s.sqlite.UpdateMailAccountUnread(ctx, sqlitedb.UpdateMailAccountUnreadParams{
+			UnreadCount: int64(count), TenantID: tenantID, ID: id,
+		})
+	} else {
+		n, e = s.postgres.UpdateMailAccountUnread(ctx, postgresdb.UpdateMailAccountUnreadParams{
+			UnreadCount: int32(count), TenantID: tenantID, ID: id,
 		})
 	}
 	return rowsAffected(n, e)

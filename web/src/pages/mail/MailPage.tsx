@@ -48,9 +48,9 @@ export default function MailPage({ scope }: MailPageProps = {}) {
   const [accounts, setAccounts] = useState<MailAccount[]>([]);
   const [total, setTotal] = useState(0);
   const [groupID, setGroupID] = useState<string | null>(null);
-  // 搜索词来自 URL（顶栏那个搜索框写进去的），不在这里另存一份 state：
+  // 搜索词来自 URL（筛选栏的关键字输入框写进去的），不在这里另存一份 state：
   // 两个真源迟早会分叉，表现为「地址栏写着 ?q=abc，列表却是全量」。
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q") ?? "";
   const [status, setStatus] = useState<AccountStatus | "">("");
   // 左栏那一段筛的是 refresh_status（登录成功/失败/从未），
@@ -84,6 +84,32 @@ export default function MailPage({ scope }: MailPageProps = {}) {
   const [reloadToken, setReloadToken] = useState(0);
   const reload = useCallback(() => setReloadToken((v) => v + 1), []);
 
+  // 分组与统计只在换租户或任务结束/批量操作后重取:它们与筛选条件无关。
+  // 之前它们和账号列表串在同一个 Promise.all 里,每切换一次状态都要等
+  // 三个请求中最慢的那个,下拉看起来就像卡住了。
+  useEffect(() => {
+    if (!tenantID) return undefined;
+    let ignore = false;
+    void (async () => {
+      try {
+        const [groupResp, statsResp] = await Promise.all([
+          mailApi.groups(tenantID),
+          // 统计失败不该让整页报错:左栏计数少几个数字,
+          // 远不如「账号列表明明拿到了却显示加载失败」严重。
+          jobApi.stats(tenantID).catch(() => null),
+        ]);
+        if (ignore) return;
+        setGroups(groupResp.data);
+        if (statsResp) setStats(statsResp.data);
+      } catch (e) {
+        if (!ignore) setError(e instanceof Error ? e.message : "加载失败");
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [tenantID, reloadToken]);
+
   useEffect(() => {
     if (!tenantID) return undefined;
     // ignore 防止「先发的慢请求后到」把新筛选条件的结果覆盖掉——
@@ -91,24 +117,16 @@ export default function MailPage({ scope }: MailPageProps = {}) {
     let ignore = false;
     void (async () => {
       try {
-        const [groupResp, accountResp, statsResp] = await Promise.all([
-          mailApi.groups(tenantID),
-          mailApi.accounts(tenantID, {
-            group_id: groupID ?? undefined,
-            q: query || undefined,
-            status: status || undefined,
-            refresh_status: refreshStatus || undefined,
-            page,
-            limit: perPage,
-          }),
-          // 统计失败不该让整页报错：左栏计数少几个数字，
-          // 远不如「账号列表明明拿到了却显示加载失败」严重。
-          jobApi.stats(tenantID).catch(() => null),
-        ]);
+        const accountResp = await mailApi.accounts(tenantID, {
+          group_id: groupID ?? undefined,
+          q: query || undefined,
+          status: status || undefined,
+          refresh_status: refreshStatus || undefined,
+          page,
+          limit: perPage,
+        });
         if (ignore) return;
         const items = accountResp.data.items;
-        setGroups(groupResp.data);
-        if (statsResp) setStats(statsResp.data);
         setAccounts(items);
         setTotal(accountResp.data.pagination.total);
         // 正在看信的那个账号如果被新的筛选条件排除掉了（或者干脆被删了），
@@ -161,6 +179,23 @@ export default function MailPage({ scope }: MailPageProps = {}) {
     },
     [resetPaging],
   );
+  const changeQuery = useCallback(
+    (value: string) => {
+      // replace: 逐字输入不该在浏览器历史里留下几十条记录。
+      // 清除按钮也只是把 q 从 URL 里删掉,列表随 effect 重新取数。
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (value) next.set("q", value);
+          else next.delete("q");
+          return next;
+        },
+        { replace: true },
+      );
+      resetPaging();
+    },
+    [setSearchParams, resetPaging],
+  );
 
   const closeAccount = useCallback(() => {
     setActiveAccount(null);
@@ -188,48 +223,12 @@ export default function MailPage({ scope }: MailPageProps = {}) {
   // 返回的路径分别是邮件栏的返回按钮和详情栏的关闭按钮。
   const pane = openMessage && activeAccount ? "detail" : activeAccount ? "messages" : "accounts";
   const paneClass = (self: string) => `${pane === self ? "flex" : "hidden"} md:flex`;
+  const messageWidth = openMessage ? "md:w-80 md:flex-none xl:w-96" : "flex-1";
   // 1280~1535px 时正文需要优先拿到空间，账号窄栏暂时折进层级导航；
   // 超宽屏再把它留在最左侧，方便在读信时切换账号。
-  const accountVisibility =
-    activeAccount && openMessage ? "hidden 2xl:flex" : paneClass("accounts");
-  const accountWidth = activeAccount ? "md:w-64 md:flex-none xl:w-72" : "flex-1";
-  const messageWidth = openMessage ? "md:w-80 md:flex-none xl:w-96" : "flex-1";
-  const accountsPane = (
-    <section
-      className={`${accountVisibility} min-h-0 min-w-0 flex-col ${accountWidth} transition-[width] duration-200`}
-    >
-      <AccountFilterBar
-        tenantID={tenantID}
-        groups={groups}
-        groupID={groupID}
-        onGroupChange={changeGroup}
-        status={status}
-        onStatusChange={changeStatus}
-        total={total}
-        compact={Boolean(activeAccount)}
-        onGroupsChanged={reload}
-      />
-
-      {error && <p className="px-4 py-3 text-sm text-kumo-danger">{error}</p>}
-
-      <AccountList
-        accounts={accounts}
-        loading={loading}
-        activeID={activeAccount?.id ?? null}
-        onSelect={selectAccount}
-        onEdit={setEditAccount}
-        page={page}
-        perPage={perPage}
-        total={total}
-        onPageChange={setPage}
-        onPerPageChange={setPerPage}
-        compact={Boolean(activeAccount)}
-      />
-    </section>
-  );
   const messagesPane = activeAccount ? (
     <div
-      className={`${paneClass("messages")} min-h-0 min-w-0 flex-col border-l border-kumo-line ${messageWidth} transition-[width] duration-200`}
+      className={`${paneClass("messages")} min-h-0 min-w-0 flex-col ${messageWidth} transition-[width] duration-200`}
     >
       <MessageList
         tenantID={tenantID}
@@ -255,6 +254,54 @@ export default function MailPage({ scope }: MailPageProps = {}) {
       </div>
     ) : null;
 
+  const accountsPane = (
+    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      <AccountFilterBar
+        tenantID={tenantID}
+        groups={groups}
+        groupID={groupID}
+        onGroupChange={changeGroup}
+        status={status}
+        onStatusChange={changeStatus}
+        query={query}
+        onQueryChange={changeQuery}
+        onGroupsChanged={reload}
+      />
+
+      {error && <p className="px-4 py-3 text-sm text-kumo-danger">{error}</p>}
+
+      <AccountList
+        accounts={accounts}
+        loading={loading}
+        activeID={activeAccount?.id ?? null}
+        onSelect={selectAccount}
+        onEdit={setEditAccount}
+        page={page}
+        perPage={perPage}
+        total={total}
+        onPageChange={setPage}
+        onPerPageChange={setPerPage}
+      />
+
+      {/* 邮箱面板从右侧滑出,不参与主布局。它挂在账号列表这一栏里,
+          所以收起左侧栏时面板会跟着列表一起左移;左边界等于「筛选栏右边缘 + 16px」,
+          与筛选输入框距左边线的间隔一致。移动端铺满整栏。 */}
+      <div
+        className={`absolute inset-y-0 right-0 z-20 flex w-full flex-col border-l border-kumo-line bg-kumo-base transition-transform duration-200 md:w-[min(100%,48rem)] xl:left-[calc(2rem+var(--ebx-action-row-w))] xl:w-auto ${
+          activeAccount ? "translate-x-0" : "translate-x-full"
+        }`}
+        aria-hidden={!activeAccount}
+      >
+        {activeAccount && (
+          <div key={activeAccount.id} className="ebx-panel-in flex min-h-0 min-w-0 flex-1">
+            {messagesPane}
+            {detailPane}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+
   return (
     <MailShell
       toolbar={
@@ -265,7 +312,6 @@ export default function MailPage({ scope }: MailPageProps = {}) {
       {/* 左栏只在 ≥1280 时并列显示，再窄就折进筛选栏的下拉里（06 文档 §5.1）。 */}
       <MailSidebar
         tenantID={tenantID}
-        activeAccountID={activeAccount?.id ?? null}
         groups={groups}
         groupID={groupID}
         onGroupChange={changeGroup}
@@ -276,8 +322,6 @@ export default function MailPage({ scope }: MailPageProps = {}) {
       />
 
       {accountsPane}
-      {messagesPane}
-      {detailPane}
 
       {exporting && (
         <ExportDialog

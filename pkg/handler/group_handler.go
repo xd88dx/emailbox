@@ -98,7 +98,8 @@ func mailError(c *echo.Context, err error) error {
 	case errors.Is(err, service.ErrAccountBanned), errors.Is(err, service.ErrAccountDisabled):
 		return failure(c, http.StatusConflict, err)
 	// 两者都是「请求没错，但当下的状态不允许」：等任务跑完、或重新确认数量即可。
-	case errors.Is(err, service.ErrCheckJobRunning), errors.Is(err, service.ErrInvalidCountChanged):
+	case errors.Is(err, service.ErrCheckJobRunning), errors.Is(err, service.ErrInvalidCountChanged),
+		errors.Is(err, service.ErrMailJobRunning):
 		return failure(c, http.StatusConflict, err)
 	case isUpstreamError(err):
 		return upstreamFailure(c, err)

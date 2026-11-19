@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 
 	"emailbox/pkg/crypto"
 	"emailbox/pkg/mailer"
@@ -41,12 +42,17 @@ type MessageService struct {
 	// chainFor 按账号构造回退链。做成字段是为了让测试注入假通道——
 	// 真实实现要连微软，单测里跑不了。
 	chainFor func(account *model.MailAccount) mailer.Client
+	// 收件箱首页缓存:自动打开/切换邮箱时一分钟内不重复打上游。
+	// 手动刷新(force)绕过它,否则用户按了刷新却看到同一份缓存。
+	cacheMu sync.Mutex
+	cache   map[string]messageCacheEntry
 }
 
 func NewMessageService(
 	store *repo.Store, cipher crypto.Cipher, q *quota.Service, opt ChainOptions,
 ) *MessageService {
-	s := &MessageService{store: store, cipher: cipher, quota: q, chainOptions: opt}
+	s := &MessageService{store: store, cipher: cipher, quota: q, chainOptions: opt,
+		cache: make(map[string]messageCacheEntry)}
 	s.chainFor = defaultChainFactory(s, opt)
 	return s
 }
@@ -70,7 +76,7 @@ type MessageListResult struct {
 // folder=all 在这里拆成收件箱 + 垃圾箱两次调用后归并——协议层不认识 all，
 // 让它认识的话每个通道都要实现一遍归并逻辑。
 func (s *MessageService) List(
-	ctx context.Context, tenantID, accountID string, opt mailer.ListOptions,
+	ctx context.Context, tenantID, accountID string, opt mailer.ListOptions, force bool,
 ) (*MessageListResult, error) {
 	if opt.Top <= 0 || opt.Top > maxTop {
 		opt.Top = min(max(opt.Top, 1), maxTop)
@@ -86,6 +92,19 @@ func (s *MessageService) List(
 	if err != nil {
 		return nil, err
 	}
+	// 只缓存首页:翻页是一次性动作,缓存它们的收益远不如再取一次。
+	cacheable := opt.Skip == 0
+	cacheKey := ""
+	if cacheable {
+		cacheKey = messageCacheKey(tenantID, accountID, messageListCacheOptions{
+			folder: string(opt.Folder), skip: opt.Skip, top: opt.Top,
+		})
+		if !force {
+			if cached, ok := s.cacheGet(cacheKey); ok {
+				return cached, nil
+			}
+		}
+	}
 	// 配额在走远端之前扣：扣完才发请求，超额时一个远端调用都不产生。
 	if err := s.quota.CheckAndConsume(ctx, tenantID, model.MetricMailFetch, 1); err != nil {
 		return nil, err
@@ -93,7 +112,14 @@ func (s *MessageService) List(
 
 	client, record := s.clientFor(ctx, tenantID, account)
 	if opt.Folder == mailer.FolderAll {
-		return s.listAll(ctx, client, record, cred, opt)
+		result, err := s.listAll(ctx, client, record, cred, opt)
+		if err != nil {
+			return nil, err
+		}
+		if cacheable {
+			s.cachePut(cacheKey, result)
+		}
+		return result, nil
 	}
 
 	messages, err := client.List(ctx, cred, opt)
@@ -101,10 +127,14 @@ func (s *MessageService) List(
 	if err != nil {
 		return nil, err
 	}
-	return &MessageListResult{
+	result := &MessageListResult{
 		Items:   nonNil(messages),
 		Channel: channelOf(err, account),
-	}, nil
+	}
+	if cacheable {
+		s.cachePut(cacheKey, result)
+	}
+	return result, nil
 }
 
 // listAll 聚合收件箱与垃圾箱，按时间倒序取前 top 条。
@@ -239,6 +269,10 @@ func (s *MessageService) batch(
 	client, record := s.clientFor(ctx, tenantID, account)
 	result, err := run(client, cred, items)
 	record(err)
+	if err == nil {
+		// 列表内容已经变了(标已读/删除),缓存必须失效。
+		s.invalidateMessageCache(tenantID, accountID)
+	}
 	return result, err
 }
 

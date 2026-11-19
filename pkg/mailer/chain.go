@@ -176,6 +176,29 @@ func (c *Chain) RefreshToken(ctx context.Context, cred Credential) error {
 	return err
 }
 
+// UnreadCount 按通道顺序查询收件箱未读数。
+func (c *Chain) UnreadCount(ctx context.Context, cred Credential) (int, error) {
+	return runChain(ctx, c, cred, func(client Client) (int, error) {
+		counter, ok := client.(UnreadCounter)
+		if !ok {
+			return 0, newError(ErrKindProviderError, client.Channel(), "当前通道不支持未读检查", nil)
+		}
+		return counter.UnreadCount(ctx, cred)
+	})
+}
+
+// MarkAllRead 按通道顺序把全部文件夹的邮件标为已读。
+func (c *Chain) MarkAllRead(ctx context.Context, cred Credential) error {
+	_, err := runChain(ctx, c, cred, func(client Client) (struct{}, error) {
+		marker, ok := client.(AllReadMarker)
+		if !ok {
+			return struct{}{}, newError(ErrKindProviderError, client.Channel(), "当前通道不支持批量标已读", nil)
+		}
+		return struct{}{}, marker.MarkAllRead(ctx, cred)
+	})
+	return err
+}
+
 // MaskEmail 把邮箱打码后写日志：u***@outlook.com。
 // 协议层的日志字段里绝不出现完整邮箱、令牌或代理口令。
 func MaskEmail(email string) string {

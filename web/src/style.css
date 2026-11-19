@@ -42,6 +42,10 @@
   --color-ebx-dot-idle: light-dark(oklch(70.8% 0 0), oklch(55.6% 0 0));
   --color-ebx-dot-unread: light-dark(oklch(57.72% 0.2324 260), oklch(70.7% 0.165 254.624));
 
+  /* 列表行被选中或鼠标掠过时的底色。中性灰会让「当前这一行」和普通悬停分不开,
+     取参考设计里的淡蓝;暗色下压成偏蓝的深色,避免亮蓝刺眼。 */
+  --color-ebx-row-active: light-dark(oklch(97.5% 0.015 255), oklch(28% 0.022 255));
+
   /* 品牌标识那个小方块的渐变。Kumo 没有渐变令牌，所以自己定义。
      两端色是 Cloudflare 商标那对橙（#f6821f → #fbad41），不随明暗切换——
      商标就是商标。渐变本身进不了 light-dark()（它接受颜色，不接受图像），
@@ -80,9 +84,35 @@
   --ebx-toolbar-h: 52px;
   --ebx-status-h: 30px;
   --ebx-sidebar-w: 300px;
+  /* 工具栏里「已读 / 启用 / 停用 / 删除」这一组的自然宽度。
+     筛选栏的输入框+状态下拉、以及右侧滑出面板的左边界都以它为基准,
+     三者的右边缘因此能落在同一条竖线上。改了那四个按钮的文案就要同步这里。 */
+  --ebx-action-row-w: 312px;
+  /* 分隔线与左侧栏右边界对齐后,动作组左边距(分隔线两侧 gap/margin 之和)。 */
+  --ebx-action-offset: 17px;
   /* 全局导航栏的两种宽度。收起时只剩图标，靠 title 提示。 */
   --ebx-nav-w: 224px;
   --ebx-nav-w-collapsed: 56px;
+}
+@keyframes ebx-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+/* 切换邮箱或打开某封信时给面板内容一个很短的入场,提示「内容已经换了」。
+   关闭动画由滑出面板自身的 transition 负责。 */
+.ebx-panel-in {
+  animation: ebx-panel-in 160ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ebx-panel-in {
+    animation: none;
+  }
 }
 @layer base {
   body {

@@ -30,6 +30,7 @@ type Config struct {
 	Crypto   CryptoConfig   `json:"crypto"`
 	SaaS     SaaSConfig     `json:"saas"`
 	Job      JobConfig      `json:"job"`
+	Mailer   MailerConfig   `json:"mailer"`
 	OAuth    OAuthConfig    `json:"oauth"`
 	Waffo    WaffoConfig    `json:"waffo"`
 }
@@ -82,6 +83,21 @@ type JobConfig struct {
 	// EventRetentionDays 控制 job_events 的保留天数。事件量与账号数成正比，
 	// 不清理会一直涨；断线重连只需要最近的那些。
 	EventRetentionDays int `json:"event_retention_days"`
+	// ProviderConcurrency 与 ProviderRatePerSec 是收信检查/批量已读的
+	// 「按服务商」限流:同一服务商最多 N 个并发、每秒 N 次请求,
+	// 不同服务商互不阻塞。默认 2/2,遇到风控先调小这两个值。
+	ProviderConcurrency int `json:"provider_concurrency"`
+	ProviderRatePerSec  int `json:"provider_rate_per_sec"`
+}
+
+// MailerConfig 是协议层的兼容性开关。
+type MailerConfig struct {
+	// TLSLegacy 打开 TLS1.2 的静态 RSA 套件。Go 1.22 起这些套件默认禁用,
+	// Go 1.27 连 tlsrsakex 兼容开关都移除了;而只支持旧套件的服务商
+	// (实测新浪 993)不改这里就永远握手失败。
+	//
+	// 注意:Go 标准库没有 FFDHE 实现,只支持 DHE 的服务器无法靠这个开关解决。
+	TLSLegacy bool `json:"tls_legacy"`
 }
 
 // OAuthProviderConfig 是一个服务商的 OAuth 应用配置。ClientSecret 只用于机密客户端；
@@ -150,12 +166,16 @@ func Init() error {
 	if err != nil {
 		return err
 	}
+	tlsLegacy, err := getEnvBool("IMAP_TLS_LEGACY", false)
+	if err != nil {
+		return err
+	}
 	returnURL := strings.TrimSpace(getEnv("OAUTH_RETURN_URL", ""))
 	if returnURL == "" {
 		// 兼容旧配置名，避免升级后已完成授权的部署丢失回跳地址。
 		returnURL = strings.TrimSpace(getEnv("MICROSOFT_OAUTH_RETURN_URL", "http://localhost:5173/mail/tokens"))
 	}
-	AppConfig = &Config{AppEnv: getEnv("APP_ENV", "development"), Server: ServerConfig{Port: getEnv("SERVER_PORT", "1323"), Host: getEnv("SERVER_HOST", "0.0.0.0"), CORSOrigins: origins, TrustProxy: trustProxy}, Database: DatabaseConfig{Driver: getEnv("DB_DRIVER", "sqlite"), Host: getEnv("DB_HOST", "localhost"), Port: getEnv("DB_PORT", "5432"), Username: getEnv("DB_USERNAME", "postgres"), Password: getEnv("DB_PASSWORD", ""), DBName: getEnv("DB_NAME", "emailbox"), SSLMode: getEnv("DB_SSLMODE", "disable"), Path: getEnv("DB_PATH", "app.db")}, Session: SessionConfig{ExpireHour: getEnvInt("SESSION_EXPIRE_HOUR", 24), CookieSecure: cookieSecure}, Crypto: CryptoConfig{Key: getEnv("ENCRYPTION_KEY", "")}, SaaS: SaaSConfig{RegistrationMode: getEnv("REGISTRATION_MODE", RegistrationOpen), BootstrapAdminUsername: strings.TrimSpace(getEnv("BOOTSTRAP_ADMIN_USERNAME", "")), BootstrapAdminPassword: getEnv("BOOTSTRAP_ADMIN_PASSWORD", ""), DefaultPlanCode: getEnv("DEFAULT_PLAN_CODE", "free")}, Job: JobConfig{Workers: getEnvInt("JOB_WORKERS", 8), AccountDelayMS: getEnvInt("JOB_ACCOUNT_DELAY_MS", 0), EventRetentionDays: getEnvInt("JOB_EVENT_RETENTION_DAYS", 7)}, OAuth: OAuthConfig{
+	AppConfig = &Config{AppEnv: getEnv("APP_ENV", "development"), Server: ServerConfig{Port: getEnv("SERVER_PORT", "1323"), Host: getEnv("SERVER_HOST", "0.0.0.0"), CORSOrigins: origins, TrustProxy: trustProxy}, Database: DatabaseConfig{Driver: getEnv("DB_DRIVER", "sqlite"), Host: getEnv("DB_HOST", "localhost"), Port: getEnv("DB_PORT", "5432"), Username: getEnv("DB_USERNAME", "postgres"), Password: getEnv("DB_PASSWORD", ""), DBName: getEnv("DB_NAME", "emailbox"), SSLMode: getEnv("DB_SSLMODE", "disable"), Path: getEnv("DB_PATH", "app.db")}, Session: SessionConfig{ExpireHour: getEnvInt("SESSION_EXPIRE_HOUR", 24), CookieSecure: cookieSecure}, Crypto: CryptoConfig{Key: getEnv("ENCRYPTION_KEY", "")}, SaaS: SaaSConfig{RegistrationMode: getEnv("REGISTRATION_MODE", RegistrationOpen), BootstrapAdminUsername: strings.TrimSpace(getEnv("BOOTSTRAP_ADMIN_USERNAME", "")), BootstrapAdminPassword: getEnv("BOOTSTRAP_ADMIN_PASSWORD", ""), DefaultPlanCode: getEnv("DEFAULT_PLAN_CODE", "free")}, Job: JobConfig{Workers: getEnvInt("JOB_WORKERS", 8), AccountDelayMS: getEnvInt("JOB_ACCOUNT_DELAY_MS", 0), EventRetentionDays: getEnvInt("JOB_EVENT_RETENTION_DAYS", 7), ProviderConcurrency: getEnvInt("JOB_PROVIDER_CONCURRENCY", 2), ProviderRatePerSec: getEnvInt("JOB_PROVIDER_RATE", 2)}, Mailer: MailerConfig{TLSLegacy: tlsLegacy}, OAuth: OAuthConfig{
 		Microsoft: OAuthProviderConfig{Enabled: microsoftOAuthEnabled, ClientID: strings.TrimSpace(getEnv("MICROSOFT_OAUTH_CLIENT_ID", "9e5f94bc-e8a4-4e73-b8be-63364c29d753")), ClientSecret: getEnv("MICROSOFT_OAUTH_CLIENT_SECRET", ""), Tenant: strings.TrimSpace(getEnv("MICROSOFT_OAUTH_TENANT", "common")), RedirectURI: strings.TrimSpace(getEnv("MICROSOFT_OAUTH_REDIRECT_URI", "http://localhost:8080"))},
 		Google:    OAuthProviderConfig{Enabled: googleOAuthEnabled, ClientID: strings.TrimSpace(getEnv("GOOGLE_OAUTH_CLIENT_ID", "")), ClientSecret: getEnv("GOOGLE_OAUTH_CLIENT_SECRET", ""), RedirectURI: strings.TrimSpace(getEnv("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8080"))},
 		ReturnURL: returnURL,

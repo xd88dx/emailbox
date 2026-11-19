@@ -59,6 +59,7 @@ type Handlers struct {
 	Health  *handler.HealthHandler
 	OAuth   *handler.OAuthHandler
 	Billing *handler.BillingHandler
+	MailJob *handler.MailJobHandler
 }
 
 func SetupRoutes(
@@ -180,6 +181,7 @@ func mountMailRoutes(m *echo.Group, h Handlers, exportLimiter echo.MiddlewareFun
 	m.POST("/accounts/batch/status", h.Account.BatchStatus, middleware.Require(model.PermissionAccountWrite), BulkBody())
 	m.POST("/accounts/batch/proxy", h.Account.BatchProxy, middleware.Require(model.PermissionAccountWrite), BulkBody())
 	m.POST("/accounts/batch/delete", h.Account.BatchDelete, middleware.Require(model.PermissionAccountDelete), BulkBody())
+	m.POST("/accounts/batch/read", h.MailJob.SubmitMarkRead, middleware.Require(model.PermissionMessageWrite), BulkBody())
 	// 按「当前失效」这个条件删除，而不是按前端传来的 ID 列表：见 HealthService.DeleteInvalid。
 	m.POST("/accounts/batch/delete-invalid", h.Health.DeleteInvalid, middleware.Require(model.PermissionAccountDelete))
 
@@ -207,6 +209,9 @@ func mountMailRoutes(m *echo.Group, h Handlers, exportLimiter echo.MiddlewareFun
 		middleware.Require(model.PermissionTokenRefresh), BulkBody())
 	// 账号检测与令牌刷新同属「批量打上游」的任务，权限一并收在 PermissionTokenRefresh。
 	m.POST("/jobs/account-check", h.Health.SubmitBatch,
+		middleware.Require(model.PermissionTokenRefresh), BulkBody())
+	// 收信检查与账号检测同属「批量打上游」,权限一并收在 PermissionTokenRefresh。
+	m.POST("/jobs/unread-check", h.MailJob.SubmitUnread,
 		middleware.Require(model.PermissionTokenRefresh), BulkBody())
 	m.GET("/account-health", h.Health.Stats, middleware.Require(model.PermissionAccountRead))
 	m.GET("/refresh/stats", h.Refresh.Stats, middleware.Require(model.PermissionAccountRead))

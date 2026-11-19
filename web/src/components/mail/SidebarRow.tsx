@@ -43,7 +43,7 @@ export function SidebarRow({
           `flex min-h-8 w-full items-center gap-2 rounded-lg text-left text-sm ${alwaysShowTrailing ? "pr-10" : "pr-2"}`,
           selected
             ? "bg-kumo-tint font-medium text-kumo-strong"
-            : "text-kumo-default hover:bg-kumo-interact",
+            : "text-kumo-default hover:bg-ebx-row-active",
         ].join(" ")}
       >
         {leading}

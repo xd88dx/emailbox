@@ -25,6 +25,8 @@ type ChainOptions struct {
 	TokenURL                string
 	GoogleOAuthClientID     string
 	GoogleOAuthClientSecret string
+	// TLSLegacy 打开静态 RSA 套件,只对确有需要的部署开启(见 configs.MailerConfig)。
+	TLSLegacy bool
 }
 
 // defaultChainFactory 返回「按账号构造回退链」的函数。
@@ -59,24 +61,28 @@ func newMailChain(s *MessageService, account *model.MailAccount, opt ChainOption
 		mailer.ChannelIMAPNew: imapx.New(imapx.Config{
 			Channel:        mailer.ChannelIMAPNew,
 			Timeout:        opt.Timeout,
+			TLSLegacy:      opt.TLSLegacy,
 			TokenURL:       opt.TokenURL,
 			OnTokenRefresh: onRotate,
 		}),
 		mailer.ChannelIMAPOld: imapx.New(imapx.Config{
 			Channel:        mailer.ChannelIMAPOld,
 			Timeout:        opt.Timeout,
+			TLSLegacy:      opt.TLSLegacy,
 			TokenURL:       opt.TokenURL,
 			OnTokenRefresh: onRotate,
 		}),
 		mailer.ChannelIMAPGmail: imapx.New(imapx.Config{
 			Channel:        mailer.ChannelIMAPGmail,
 			Timeout:        opt.Timeout,
+			TLSLegacy:      opt.TLSLegacy,
 			TokenURL:       opt.TokenURL,
 			OnTokenRefresh: onRotate,
 		}),
 		mailer.ChannelIMAP: imapx.New(imapx.Config{
-			Channel: mailer.ChannelIMAP,
-			Timeout: opt.Timeout,
+			Channel:   mailer.ChannelIMAP,
+			Timeout:   opt.Timeout,
+			TLSLegacy: opt.TLSLegacy,
 		}),
 	})
 	previous := account.AuthChannel

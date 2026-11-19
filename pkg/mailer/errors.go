@@ -29,6 +29,10 @@ const (
 	ErrKindFolderUnavailable  ErrKind = "folder_unavailable"
 	ErrKindProviderError      ErrKind = "provider_error"
 	ErrKindCanceled           ErrKind = "canceled"
+	// ErrKindTLSHandshake 是 TLS 协商失败(证书之后的握手阶段)。
+	// 它与 network 分开,因为处置完全不同:换代理不会改变服务端支持的套件,
+	// 用户要做的是开 IMAP_TLS_LEGACY 或确认服务商是否只支持 Go 没有的 DHE。
+	ErrKindTLSHandshake ErrKind = "tls_handshake"
 )
 
 // Attempt 记录一次通道或代理的尝试，供排障时还原整条回退路径。

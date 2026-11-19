@@ -1254,3 +1254,49 @@ Graph 刚在 `ba53d14` 恢复；http 代理只有 Graph 通道能用，经 OAuth
 `TestTokenRefreshDoesNotReviveInvalidAccount` 红；把 `network` 并进 invalid →
 `TestAccountCheckClassifiesHealth` 与 `TestDeleteInvalidAccounts` 红；还原后复绿。
 PostgreSQL 侧对照本地没跑（本机 Docker 未启动），交给 CI 的 PG service。
+
+### 收信未读、批量已读、侧栏常驻与 IMAP TLS 兼容(2026-11-19,用户要求)
+
+- 000024:`mail_accounts` 加 `unread_count / unread_checked_at`。它们是收信检查的
+  元数据缓存,不是邮件;8 条分页 SQL 的 `ORDER BY` 前统一加 `(unread_count > 0) DESC`,
+  未读账号置顶靠服务端排序(前端排序只能影响当前页)。`UpdateMailAccountUnread` 是窄更新。
+- 新任务 `unread_check` 与 `mark_read`(`UnreadService` / `MarkReadService`),共享
+  按服务商限流(`JOB_PROVIDER_CONCURRENCY` / `JOB_PROVIDER_RATE`,默认 2/2),
+  提交时按 provider 交错排队,避免一家占满 worker。两者互斥,且 60 秒内查过的账号不再重查
+  (显式选中时除外)。未读检查不扣 `daily_mail_fetch`。
+- 协议层用窄接口 `UnreadCounter` / `AllReadMarker`:IMAP 用 `STATUS INBOX (UNSEEN)` 与
+  遍历所有可选文件夹 `STORE 1:* +FLAGS.SILENT \Seen`;Graph 用 `unreadItemCount` 与
+  逐文件夹分页 PATCH。`Chain` 负责按通道转发,没有把这些方法塞进 `Client`。
+- 前端「刷新」改为提交收信检查任务:进度画在按钮内部(底边进度条 + `done/total`,
+  固定标签宽度),再点一次就是停止,不额外加停止按钮——那会让工具栏宽度在任务开始/结束时跳一次。
+  新增「已读」按钮(在「启用」左侧)。账号列表邮箱名旁用状态圆点 + 数字显示未读(>99 显示 99+)。
+  点击账号后左侧栏不再自动收起,`collapsed` 只跟随用户偏好。点击邮箱时账号列表宽度保持不变,
+邮件面板从右侧滑出,且挂在账号列表这一栏里:收起左侧栏时面板跟着列表一起左移。
+面板左边界 = 筛选栏右边缘 + 16px(与输入框距左边线同样的间隔),由
+`--ebx-action-row-w` 与筛选栏的固定宽度共同保证。工具栏「导入邮箱」缩为「导入」。
+面板内部保留原版的列表+正文并列(单栏改回并列,便于连续切换邮件);切邮箱时用
+160ms 的 `ebx-panel-in` 提示内容已换。状态筛选改成 DropdownMenu(显式 `side="bottom"`),
+不再因 Select 对齐选中项而向上翻。列表摘要和详情工具栏会从主题/正文里识别验证码
+(必须紧邻中英文关键词、4–8 位且含数字)并给出一键复制。列表行的整行都是打开邮件的
+点击区(勾选框和复制按钮阻止冒泡);验证码 chip 位于发件人与主题之间,上下间距一致(6px),
+没有验证码时整块不渲染。有验证码的行借虚拟列表的 `measureElement` 自适应变高(约 92px),
+无验证码的行仍是 76px。选中/掠过的列表行用 `--color-ebx-row-active` 的淡蓝底
+(暗色下压成偏蓝深色),不再用中性 `kumo-interact`。详情在浏览器端按消息缓存 5 分钟、
+最多 60 条,在两封信之间来回切换不重复走上游。筛选栏不再显示「共 N 个账号」。
+刷新与「已读」两个按钮都把进度画在自身内部,再点即停止;「已读」只换图标、固定文案,宽度不变。
+收件箱首页在服务端缓存 60 秒(不重复打上游、不重复扣取件额度),右上角手动刷新带 `refresh=1`
+绕过缓存,前端再做 5 秒冷却防止连点。
+  另外把分组与统计从账号列表的取数 effect 里拆出来:它们与筛选条件无关,
+  之前每切换一次状态都要等三个请求中最慢的那个,状态筛选因此看起来卡顿。
+- **TLS 坑:Go 1.27 没有 FFDHE 实现**,`tlsrsakex` 也已移除,任何开关都救不了只支持 DHE 的服务器。
+  静态 RSA 仍实现但默认禁用;显式设置 `Config.CipherSuites` 可以重新启用。
+  实测新浪 `imap.sina.com:993` 接受 `TLS1.2 + AES128-GCM-SHA256`(静态 RSA),
+  因此新增 `IMAP_TLS_LEGACY=true`(默认关),打开后套件 = 默认 ECDHE + 四条静态 RSA。
+  握手失败单独分类为 `tls_handshake`,不再被改写成「全部代理候选均不可用」。
+- 另一个实测细节:用 IP 当 IMAP 主机(如 `116.133.8.249`)时,证书是 `*.sina.com`,
+  `ServerName` 用 IP 会让 TLS 校验失败——这不是套件问题,配置主机名即可。不要为此关掉证书校验。
+
+测试:`TestLegacyCipherSuitesKeepModernSuites`、`TestUnreadCountAndMarkAllRead`(imapmemserver)、
+`TestMailJobsWriteBackUnreadCount`、`TestUnreadSortParity`;前端 20 个文件 90 条用例通过。
+TLS 用一次性探测程序对本机 Go 1.27 实测:开关关闭握手失败、打开后协商出 `0x9c`。
+PostgreSQL 对照本地仍未跑(本机未起 Docker),交给 CI。

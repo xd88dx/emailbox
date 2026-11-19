@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -547,6 +548,37 @@ func TestAccountFilterParity(t *testing.T) {
 
 // 健康状态的写回、聚合与按条件软删在两个引擎上各写一份，结果必须一致：
 // 「删除失效账号」少删是小事，多删一个就是事故。
+// 有未读的账号必须排在最前面,且未读只是最前置的排序键——其余排序键的顺序保持原样。
+// 列表是服务端分页的,前端无法把其他页的未读账号捞上来。
+func TestUnreadSortParity(t *testing.T) {
+	for _, e := range parityEngines(t) {
+		ctx := context.Background()
+		tenantID := seed(t, e.store)
+		ids := seedAccounts(t, e.store, tenantID, "alpha@qq.com", "beta@qq.com", "gamma@qq.com")
+		if err := e.store.UpdateMailAccountUnread(ctx, tenantID, ids[1], 3); err != nil {
+			t.Fatalf("%s: %v", e.name, err)
+		}
+
+		rows, err := e.store.ListMailAccountsPage(ctx, tenantID, model.AccountFilter{
+			Sort: "email", Order: "asc",
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", e.name, err)
+		}
+		emails := make([]string, 0, len(rows))
+		for _, r := range rows {
+			emails = append(emails, r.Email)
+		}
+		want := []string{"beta@qq.com", "alpha@qq.com", "gamma@qq.com"}
+		if !reflect.DeepEqual(emails, want) {
+			t.Errorf("%s: 未读置顶顺序为 %v,期望 %v", e.name, emails, want)
+		}
+		if rows[0].UnreadCount != 3 {
+			t.Errorf("%s: 未读数未写回: %d", e.name, rows[0].UnreadCount)
+		}
+	}
+}
+
 func TestAccountHealthParity(t *testing.T) {
 	type outcome struct {
 		counts    string

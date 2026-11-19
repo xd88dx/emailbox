@@ -136,6 +136,20 @@ export const jobApi = {
     },
   ) => (await client.post<ApiResponse<Job>>(`${mailBase(tenant)}/jobs/account-check`, data)).data,
 
+  // 刷新按钮触发的收信检查:只查未读元数据,不下载邮件、不扣取件额度。
+  submitUnreadCheck: async (
+    tenant: TenantRef,
+    data: { scope: "all" | "group" | "selected"; account_ids?: string[]; group_ids?: string[] },
+  ) => (await client.post<ApiResponse<Job>>(`${mailBase(tenant)}/jobs/unread-check`, data)).data,
+
+  // 把选中账号的所有文件夹标为已读。账号多时是后台任务,接口只返回 job。
+  submitMarkRead: async (tenant: TenantRef, accountIDs: string[]) =>
+    (
+      await client.post<ApiResponse<Job>>(`${mailBase(tenant)}/accounts/batch/read`, {
+        account_ids: accountIDs,
+      })
+    ).data,
+
   health: async (tenant: TenantRef) =>
     (await client.get<ApiResponse<HealthStats>>(`${mailBase(tenant)}/account-health`)).data,
 
