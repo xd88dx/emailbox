@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { jobApi, type RefreshStats } from "@/api/jobs";
+import { isTerminal, jobApi, type RefreshStats } from "@/api/jobs";
 import {
   mailApi,
   mailScopeKey,
@@ -75,6 +75,11 @@ export default function MailPage({ scope }: MailPageProps = {}) {
   // 收信检查任务的逐账号结果,用来在列表里实时显示绿/红点。
   const jobType = useJobStore((s) => s.jobType);
   const checkResults = useJobStore((s) => s.byAccount);
+  const jobStatus = useJobStore((s) => s.status);
+  // 检查结果只在任务运行期间当实时值用。任务结束后库里已经有同一次检查
+  // 写回的数字，继续拿快照覆盖会让「已读/删除后未读数减少」看不见。
+  // 绿/红点仍然按快照显示，它们表达的是定性结论，不受这个切换影响。
+  const checkLive = jobType === "unread_check" && !(jobStatus && isTerminal(jobStatus));
 
   // 右边两栏各自跟着一个选择：看哪个邮箱的信、看哪封信。
   // editAccount 是另一条线（改配置），和「看信」互不影响，所以分开存。
@@ -287,6 +292,7 @@ export default function MailPage({ scope }: MailPageProps = {}) {
         onPageChange={setPage}
         onPerPageChange={setPerPage}
         checkResults={jobType === "unread_check" ? checkResults : undefined}
+        unreadFromCheck={checkLive}
       />
 
       {/* 邮箱面板从右侧滑出,不参与主布局。它挂在账号列表这一栏里,

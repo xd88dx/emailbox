@@ -15,10 +15,11 @@ import (
 // fakeMailClient 只实现收信检查/批量已读用得到的那两个窄接口。
 // 其余方法保持空实现:这两个任务不该顺带调用 List/Detail/Delete。
 type fakeMailClient struct {
-	unread    int
-	marked    bool
-	listCalls int
-	err       error
+	unread          int
+	marked          bool
+	listCalls       int
+	listUnreadCalls int
+	err             error
 }
 
 func (f *fakeMailClient) Channel() string { return mailer.ChannelIMAP }
@@ -26,6 +27,18 @@ func (f *fakeMailClient) List(context.Context, mailer.Credential, mailer.ListOpt
 	f.listCalls++
 	return []mailer.Message{{ID: "1", Subject: "hi"}}, f.err
 }
+
+// ListWithUnread 让 fake 具备「顺带取未读」的能力。仍然走 List，
+// 现有用例统计上游调用次数的断言才继续成立。
+func (f *fakeMailClient) ListWithUnread(
+	ctx context.Context, cred mailer.Credential, opt mailer.ListOptions,
+) (mailer.ListResult, error) {
+	f.listUnreadCalls++
+	messages, err := f.List(ctx, cred, opt)
+	count := f.unread
+	return mailer.ListResult{Messages: messages, Unread: &count}, err
+}
+
 func (f *fakeMailClient) Detail(context.Context, mailer.Credential, mailer.Folder, string, string) (*mailer.Detail, error) {
 	return nil, nil
 }
@@ -114,6 +127,76 @@ func TestMessageListCacheRespectsForceAndInvalidation(t *testing.T) {
 	}
 	if fake.listCalls != 3 {
 		t.Fatalf("标已读后缓存没有失效: %d 次", fake.listCalls)
+	}
+}
+
+// 手动刷新邮件列表时顺带写回收件箱未读数;自动打开、翻页、非收件箱都不查。
+func TestMessageListRefreshWritesBackUnread(t *testing.T) {
+	configs.AppConfig = &configs.Config{Session: configs.SessionConfig{ExpireHour: 24}}
+	store := testStore(t)
+	cipher, err := crypto.New("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := service.NewAuthService(store)
+	result, _, err := auth.Register(context.Background(), model.RegisterRequest{
+		Username: "erin", Email: "erin@example.com", Password: "secret12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := result.Tenants[0].ID
+	accounts := service.NewAccountService(store, cipher, quota.NewService(store))
+	created, err := accounts.Create(context.Background(), tenantID, model.CreateMailAccountRequest{
+		Email: "refresh@qq.com", Password: "authcode",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeMailClient{unread: 4}
+	messages := service.NewMessageService(store, cipher, quota.NewService(store), service.ChainOptions{}).
+		WithChainFactory(func(*model.MailAccount) mailer.Client { return fake })
+	ctx := context.Background()
+	if err := store.UpdateMailAccountUnread(ctx, tenantID, created.ID, 9); err != nil {
+		t.Fatal(err)
+	}
+
+	// 自动打开不该为一次缓存更新多打一次上游。
+	if _, err := messages.List(ctx, tenantID, created.ID,
+		mailer.ListOptions{Folder: mailer.FolderInbox, Top: 25}, false); err != nil {
+		t.Fatal(err)
+	}
+	if fake.listUnreadCalls != 0 {
+		t.Fatalf("自动打开时查了未读: %d 次", fake.listUnreadCalls)
+	}
+
+	// 手动刷新收件箱:查一次并写回。
+	if _, err := messages.List(ctx, tenantID, created.ID,
+		mailer.ListOptions{Folder: mailer.FolderInbox, Top: 25}, true); err != nil {
+		t.Fatal(err)
+	}
+	if fake.listUnreadCalls != 1 {
+		t.Fatalf("手动刷新应查一次未读,实际 %d 次", fake.listUnreadCalls)
+	}
+	stored, err := store.GetMailAccount(ctx, tenantID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.UnreadCount != 4 {
+		t.Fatalf("刷新后未读数 = %d,期望 4", stored.UnreadCount)
+	}
+
+	// 非收件箱与翻页都不查。
+	for _, opt := range []mailer.ListOptions{
+		{Folder: mailer.FolderJunk, Top: 25},
+		{Folder: mailer.FolderInbox, Top: 25, Skip: 25},
+	} {
+		if _, err := messages.List(ctx, tenantID, created.ID, opt, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fake.listUnreadCalls != 1 {
+		t.Fatalf("非收件箱/翻页不该查未读,实际 %d 次", fake.listUnreadCalls)
 	}
 }
 

@@ -120,6 +120,22 @@ type ListOptions struct {
 	Top    int
 }
 
+// ListResult 是一次列表拉取的结果。
+type ListResult struct {
+	Messages []Message
+	// Unread 是本次顺带查到的收件箱未读数。nil 表示这次没查，或没查到。
+	Unread *int
+}
+
+// UnreadLister 是「拉列表时顺带查收件箱未读数」的可选能力。
+//
+// 独立于 Client：单独的未读查询要重新建连、鉴权，过代理时尤其慢。
+// 只有手动刷新列表时 service 才用类型断言挑出实现了它的通道，
+// 其余通道退回普通 List。
+type UnreadLister interface {
+	ListWithUnread(ctx context.Context, cred Credential, opt ListOptions) (ListResult, error)
+}
+
 // ItemResult 是批量操作里单封邮件的结果。
 type ItemResult struct {
 	Ref   MessageRef `json:"ref"`

@@ -384,6 +384,38 @@ func TestUnreadCountAndMarkAllRead(t *testing.T) {
 	}
 }
 
+// 手动刷新列表时顺带取未读：同一个会话里完成。
+// 非收件箱不查，避免把垃圾箱的未读数当成收件箱的写回库里。
+func TestListWithUnread(t *testing.T) {
+	ts := newTestServer(t, map[string][]string{
+		"INBOX": {makeMessage("a", "1"), makeMessage("b", "2")},
+		"junk":  {makeMessage("c", "3")},
+	})
+	client := ts.client()
+	cred := testCred()
+
+	res, err := client.ListWithUnread(context.Background(), cred,
+		mailer.ListOptions{Folder: mailer.FolderInbox, Top: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Messages) != 2 {
+		t.Fatalf("列表条数 = %d,期望 2", len(res.Messages))
+	}
+	if res.Unread == nil || *res.Unread != 2 {
+		t.Fatalf("未读数 = %v,期望 2", res.Unread)
+	}
+
+	res, err = client.ListWithUnread(context.Background(), cred,
+		mailer.ListOptions{Folder: mailer.FolderJunk, Top: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Unread != nil {
+		t.Fatalf("垃圾箱不该返回未读数,实际 %d", *res.Unread)
+	}
+}
+
 func TestDeleteExpunges(t *testing.T) {
 	ts := newTestServer(t, map[string][]string{
 		"INBOX": {makeMessage("keep", "1"), makeMessage("remove", "2")},

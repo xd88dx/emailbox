@@ -21,18 +21,27 @@ type graphPage struct {
 // unreadItemCount 是 Graph 维护的聚合值,不需要把邮件列出来再数。
 func (c *Client) UnreadCount(ctx context.Context, cred mailer.Credential) (int, error) {
 	return withSession(ctx, c, cred, func(ctx context.Context, s *session) (int, error) {
-		var out struct {
-			UnreadItemCount *int `json:"unreadItemCount"`
-		}
-		if err := c.doJSON(ctx, s, "GET",
-			"/me/mailFolders/inbox?$select=unreadItemCount", nil, &out); err != nil {
+		count, err := c.inboxUnread(ctx, s)
+		if err != nil {
 			return 0, err
 		}
-		if out.UnreadItemCount == nil {
+		if count == nil {
 			return 0, nil
 		}
-		return *out.UnreadItemCount, nil
+		return *count, nil
 	})
+}
+
+// inboxUnread 在已有会话里取收件箱未读数，供列表顺带查询复用。
+func (c *Client) inboxUnread(ctx context.Context, s *session) (*int, error) {
+	var out struct {
+		UnreadItemCount *int `json:"unreadItemCount"`
+	}
+	if err := c.doJSON(ctx, s, "GET",
+		"/me/mailFolders/inbox?$select=unreadItemCount", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.UnreadItemCount, nil
 }
 
 // MarkAllRead 实现 mailer.AllReadMarker:遍历全部 mailFolders,

@@ -138,13 +138,19 @@ export function MessageList({
       } catch (e) {
         if (!ignore) patch(key, (prev) => ({ ...prev, error: message(e), loading: false }));
       } finally {
-        if (!ignore) setRefreshing(false);
+        if (!ignore) {
+          setRefreshing(false);
+          // 服务端在每次取列表时都会写回账号的访问结果（成功或失败），
+          // 手动刷新还会顺带更新未读数。不通知外层，账号行会一直停在
+          // 打开这个邮箱之前的样子——令牌失效了还显示「有效」。
+          onAccountsChanged?.();
+        }
       }
     })();
     return () => {
       ignore = true;
     };
-  }, [key, tenantID, accountID, folder, patch]);
+  }, [key, tenantID, accountID, folder, patch, onAccountsChanged]);
 
   const loadMore = useCallback(
     async (skip: number) => {

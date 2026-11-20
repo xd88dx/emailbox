@@ -94,6 +94,10 @@ func (s *MessageService) List(
 	}
 	// 只缓存首页:翻页是一次性动作,缓存它们的收益远不如再取一次。
 	cacheable := opt.Skip == 0
+	// 手动刷新时顺带查一次未读数：列表本来就要建会话，未读只是一条元数据命令。
+	// 自动打开与切文件夹不加，避免把这次查询摊到每一次点击上。
+	wantUnread := force && cacheable &&
+		(opt.Folder == mailer.FolderInbox || opt.Folder == mailer.FolderAll)
 	cacheKey := ""
 	if cacheable {
 		cacheKey = messageCacheKey(tenantID, accountID, messageListCacheOptions{
@@ -112,21 +116,23 @@ func (s *MessageService) List(
 
 	client, record := s.clientFor(ctx, tenantID, account)
 	if opt.Folder == mailer.FolderAll {
-		result, err := s.listAll(ctx, client, record, cred, opt)
+		result, unread, err := s.listAll(ctx, client, record, cred, opt, wantUnread)
 		if err != nil {
 			return nil, err
 		}
+		s.rememberUnread(ctx, tenantID, accountID, unread)
 		if cacheable {
 			s.cachePut(cacheKey, result)
 		}
 		return result, nil
 	}
 
-	messages, err := client.List(ctx, cred, opt)
+	messages, unread, err := listMessages(ctx, client, cred, opt, wantUnread)
 	record(err)
 	if err != nil {
 		return nil, err
 	}
+	s.rememberUnread(ctx, tenantID, accountID, unread)
 	result := &MessageListResult{
 		Items:   nonNil(messages),
 		Channel: channelOf(err, account),
@@ -143,16 +149,17 @@ func (s *MessageService) List(
 // 当一个邮件夹的邮件明显更新时，翻到第二页会漏掉另一个邮件夹的邮件。
 func (s *MessageService) listAll(
 	ctx context.Context, client mailer.Client, record func(error),
-	cred mailer.Credential, opt mailer.ListOptions,
-) (*MessageListResult, error) {
+	cred mailer.Credential, opt mailer.ListOptions, wantUnread bool,
+) (*MessageListResult, *int, error) {
 	merged := make([]mailer.Message, 0, opt.Top*2)
 	var firstErr error
+	var unread *int
 	for _, folder := range []mailer.Folder{mailer.FolderInbox, mailer.FolderJunk} {
-		part, err := client.List(ctx, cred, mailer.ListOptions{
+		part, count, err := listMessages(ctx, client, cred, mailer.ListOptions{
 			Folder: folder,
 			Skip:   0,
 			Top:    opt.Skip + opt.Top,
-		})
+		}, wantUnread && folder == mailer.FolderInbox)
 		if err != nil {
 			// 一个邮件夹取不到不该让整个请求失败：多数账号的垃圾箱是可有可无的，
 			// 而收件箱拿到了就该展示出来。全都失败时才报错。
@@ -163,11 +170,14 @@ func (s *MessageService) listAll(
 				"folder", folder, "email", mailer.MaskEmail(cred.Email), "error", err)
 			continue
 		}
+		if count != nil {
+			unread = count
+		}
 		merged = append(merged, part...)
 	}
 	if len(merged) == 0 && firstErr != nil {
 		record(firstErr)
-		return nil, firstErr
+		return nil, nil, firstErr
 	}
 	record(nil)
 
@@ -182,7 +192,40 @@ func (s *MessageService) listAll(
 	if len(merged) > opt.Top {
 		merged = merged[:opt.Top]
 	}
-	return &MessageListResult{Items: nonNil(merged)}, nil
+	return &MessageListResult{Items: nonNil(merged)}, unread, nil
+}
+
+// listMessages 拉一页列表；wantUnread 时走「顺带取未读」的通道能力。
+//
+// 不支持该能力的通道（测试桩、以后新增的实现）退回普通 List，
+// 未读数留空，调用方沿用库里已有的值。
+func listMessages(
+	ctx context.Context, client mailer.Client, cred mailer.Credential,
+	opt mailer.ListOptions, wantUnread bool,
+) ([]mailer.Message, *int, error) {
+	if wantUnread {
+		if lister, ok := client.(mailer.UnreadLister); ok {
+			result, err := lister.ListWithUnread(ctx, cred, opt)
+			return result.Messages, result.Unread, err
+		}
+	}
+	messages, err := client.List(ctx, cred, opt)
+	return messages, nil, err
+}
+
+// rememberUnread 把列表顺带查到的收件箱未读数写回账号。
+//
+// 写回失败只记日志：列表已经拿到了，不能因为一个缓存值没记上就让用户看不到信。
+func (s *MessageService) rememberUnread(
+	ctx context.Context, tenantID, accountID string, unread *int,
+) {
+	if unread == nil {
+		return
+	}
+	if err := s.store.UpdateMailAccountUnread(ctxDetached(ctx), tenantID, accountID, *unread); err != nil &&
+		!errors.Is(err, repo.ErrNotFound) {
+		slog.Warn("写回收件箱未读数失败", "account_id", accountID, "error", err)
+	}
 }
 
 // Detail 取一封邮件的详情。

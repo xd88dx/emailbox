@@ -125,9 +125,26 @@ func (a graphAttachment) toMeta() mailer.AttachmentMeta {
 
 // List 实现 mailer.Client。
 func (c *Client) List(ctx context.Context, cred mailer.Credential, opt mailer.ListOptions) ([]mailer.Message, error) {
+	result, err := c.list(ctx, cred, opt, false)
+	return result.Messages, err
+}
+
+// ListWithUnread 实现 mailer.UnreadLister：在同一次会话里顺带取收件箱未读数。
+//
+// 未读是 Graph 维护的聚合值，消息列表里没有它，只能单独问一次
+// mailFolders/inbox；复用已有会话，不额外换令牌。
+func (c *Client) ListWithUnread(
+	ctx context.Context, cred mailer.Credential, opt mailer.ListOptions,
+) (mailer.ListResult, error) {
+	return c.list(ctx, cred, opt, true)
+}
+
+func (c *Client) list(
+	ctx context.Context, cred mailer.Credential, opt mailer.ListOptions, withUnread bool,
+) (mailer.ListResult, error) {
 	folder, err := folderPath(opt.Folder)
 	if err != nil {
-		return nil, err
+		return mailer.ListResult{}, err
 	}
 	top := opt.Top
 	if top <= 0 {
@@ -143,18 +160,25 @@ func (c *Client) List(ctx context.Context, cred mailer.Credential, opt mailer.Li
 	}
 	path := "/me/mailFolders/" + folder + "/messages?" + query.Encode()
 
-	return withSession(ctx, c, cred, func(ctx context.Context, s *session) ([]mailer.Message, error) {
+	return withSession(ctx, c, cred, func(ctx context.Context, s *session) (mailer.ListResult, error) {
 		var payload struct {
 			Value []graphMessage `json:"value"`
 		}
 		if err := c.doJSON(ctx, s, "GET", path, nil, &payload); err != nil {
-			return nil, err
+			return mailer.ListResult{}, err
 		}
 		out := make([]mailer.Message, 0, len(payload.Value))
 		for _, m := range payload.Value {
 			out = append(out, m.toMessage(opt.Folder))
 		}
-		return out, nil
+		result := mailer.ListResult{Messages: out}
+		// 未读查询失败不影响列表：它只是一个缓存值，下一次检查仍会写回。
+		if withUnread && opt.Folder == mailer.FolderInbox {
+			if count, err := c.inboxUnread(ctx, s); err == nil {
+				result.Unread = count
+			}
+		}
+		return result, nil
 	})
 }
 

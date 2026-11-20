@@ -336,6 +336,44 @@ func TestListBuildsQueryAndMapsFields(t *testing.T) {
 	}
 }
 
+// 手动刷新时顺带取收件箱未读数：复用同一次令牌会话，且只在收件箱上问。
+func TestListWithUnreadFetchesInboxCount(t *testing.T) {
+	s := newStub(t)
+	s.apiHandler = func(_, path string) (int, http.Header, string) {
+		if strings.Contains(path, "unreadItemCount") {
+			return 200, jsonHeader(), `{"unreadItemCount":3}`
+		}
+		return 200, jsonHeader(), `{"value":[]}`
+	}
+	c := s.client(Config{})
+
+	res, err := c.ListWithUnread(context.Background(), testCred(),
+		mailer.ListOptions{Folder: mailer.FolderInbox, Top: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Unread == nil || *res.Unread != 3 {
+		t.Fatalf("未读数 = %v,期望 3", res.Unread)
+	}
+	if len(s.calls()) != 2 {
+		t.Fatalf("收件箱应打两次请求（列表 + 未读），实际 %v", s.calls())
+	}
+
+	// 非收件箱不该多打一次未读请求。
+	before := len(s.calls())
+	res, err = c.ListWithUnread(context.Background(), testCred(),
+		mailer.ListOptions{Folder: mailer.FolderJunk, Top: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Unread != nil {
+		t.Fatalf("垃圾箱不该返回未读数,实际 %d", *res.Unread)
+	}
+	if len(s.calls()) != before+1 {
+		t.Fatalf("垃圾箱只该打一次列表请求，实际新增 %v", s.calls()[before:])
+	}
+}
+
 func TestFolderMapping(t *testing.T) {
 	cases := map[mailer.Folder]string{
 		mailer.FolderInbox:   "inbox",

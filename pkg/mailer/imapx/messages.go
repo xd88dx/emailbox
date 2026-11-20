@@ -95,26 +95,56 @@ func listMailboxes(client *imapclient.Client) ([]string, error) {
 func (c *Client) List(
 	ctx context.Context, cred mailer.Credential, opt mailer.ListOptions,
 ) ([]mailer.Message, error) {
+	result, err := c.list(ctx, cred, opt, false)
+	return result.Messages, err
+}
+
+// ListWithUnread 实现 mailer.UnreadLister：在同一次会话里顺带查收件箱未读数。
+//
+// 单独查未读要重新建连并鉴权，过代理时可能多出几秒；而这里本来就要
+// 建会话取列表，STATUS 只是一条只读元数据命令。
+func (c *Client) ListWithUnread(
+	ctx context.Context, cred mailer.Credential, opt mailer.ListOptions,
+) (mailer.ListResult, error) {
+	return c.list(ctx, cred, opt, true)
+}
+
+// list 是 List 与 ListWithUnread 的共同实现。
+func (c *Client) list(
+	ctx context.Context, cred mailer.Credential, opt mailer.ListOptions, withUnread bool,
+) (mailer.ListResult, error) {
 	top := opt.Top
 	if top <= 0 {
 		top = 20
 	}
 	skip := max(opt.Skip, 0)
 
-	return withSession(ctx, c, cred, func(_ context.Context, s *session) ([]mailer.Message, error) {
+	return withSession(ctx, c, cred, func(_ context.Context, s *session) (mailer.ListResult, error) {
+		var result mailer.ListResult
+		// STATUS 要在 SELECT 之前发：RFC 3501 不建议对当前选中的邮箱用 STATUS。
+		// 查不到不影响列表——未读数只是一个缓存值，下一次检查仍会写回。
+		if withUnread && opt.Folder == mailer.FolderInbox {
+			if data, err := s.imap.Status("INBOX", &imap.StatusOptions{NumUnseen: true}).Wait(); err == nil &&
+				data.NumUnseen != nil {
+				count := int(*data.NumUnseen)
+				result.Unread = &count
+			}
+		}
 		total, err := c.selectFolder(s, cred, opt.Folder)
 		if err != nil {
-			return nil, err
+			return mailer.ListResult{}, err
 		}
 		if total == 0 {
-			return []mailer.Message{}, nil
+			result.Messages = []mailer.Message{}
+			return result, nil
 		}
 
 		// IMAP 的序号是「从旧到新」的 1..total，而列表要按时间倒序，
 		// 所以从尾部往前切。skip 超过总数时是空页，不是错误。
 		start, end, ok := pageRange(total, skip, top)
 		if !ok {
-			return []mailer.Message{}, nil
+			result.Messages = []mailer.Message{}
+			return result, nil
 		}
 
 		var seqSet imap.SeqSet
@@ -129,7 +159,7 @@ func (c *Client) List(
 		}
 		buffers, err := s.imap.Fetch(seqSet, fetchOpt).Collect()
 		if err != nil {
-			return nil, errorf(c.cfg.Channel, mailer.ErrKindProviderError, err, "抓取邮件列表失败")
+			return mailer.ListResult{}, errorf(c.cfg.Channel, mailer.ErrKindProviderError, err, "抓取邮件列表失败")
 		}
 
 		out := make([]mailer.Message, 0, len(buffers))
@@ -138,7 +168,8 @@ func (c *Client) List(
 		}
 		// FETCH 按序号升序返回（旧→新），倒过来给前端。
 		reverse(out)
-		return out, nil
+		result.Messages = out
+		return result, nil
 	})
 }
 

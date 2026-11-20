@@ -51,6 +51,9 @@ interface AccountListProps {
   onPerPageChange: (perPage: number) => void;
   // 收信检查的逐账号结果:成功且无新邮件显示绿点,失败显示红点。
   checkResults?: Record<string, RecentItem>;
+  // 未读数是否采信 checkResults 里的实时快照。任务结束后应改回库里的值，
+  // 否则「已读/删除后未读数减少」会被旧快照盖住。
+  unreadFromCheck?: boolean;
 }
 
 export function AccountList({
@@ -65,6 +68,7 @@ export function AccountList({
   onPageChange,
   onPerPageChange,
   checkResults,
+  unreadFromCheck = false,
 }: AccountListProps) {
   const selected = useSelectionStore((s) => s.selected);
   const selectPage = useSelectionStore((s) => s.selectPage);
@@ -114,6 +118,7 @@ export function AccountList({
               onSelect={onSelect}
               onEdit={onEdit}
               check={checkResults?.[account.id]}
+              unreadFromCheck={unreadFromCheck}
             />
           )}
         />
@@ -165,17 +170,21 @@ function AccountRow({
   onSelect,
   onEdit,
   check,
+  unreadFromCheck,
 }: {
   account: MailAccount;
   active: boolean;
   onSelect: (account: MailAccount) => void;
   onEdit: (account: MailAccount) => void;
   check?: RecentItem;
+  unreadFromCheck: boolean;
 }) {
   // 只订阅这一行的选中状态，避免勾选任何一行都让整张列表重渲染。
   const checked = useSelectionStore((s) => s.selected.has(account.id));
   const toggle = useSelectionStore((s) => s.toggle);
-  const displayUnread = check?.unread ?? account.unread_count;
+  // 任务运行中采信实时快照（列表还没重取，库里的值反而是旧的）；
+  // 任务结束后库里的值才是最新的，继续用快照会把刚减少的未读数盖回去。
+  const displayUnread = (unreadFromCheck ? check?.unread : undefined) ?? account.unread_count;
   const checkFailed = check?.status === "failed";
   const checkedNoMail = check?.status === "success" && check.unread === 0;
 

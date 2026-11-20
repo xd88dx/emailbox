@@ -139,6 +139,20 @@ func (c *Chain) List(ctx context.Context, cred Credential, opt ListOptions) ([]M
 	})
 }
 
+// ListWithUnread 按通道顺序拉列表；通道支持时顺带查收件箱未读数。
+// 不支持该能力的通道（测试桩、以后新增的实现）退回普通 List，
+// 未读数留空由上层决定是否沿用旧值。
+func (c *Chain) ListWithUnread(ctx context.Context, cred Credential, opt ListOptions) (ListResult, error) {
+	return runChain(ctx, c, cred, func(client Client) (ListResult, error) {
+		lister, ok := client.(UnreadLister)
+		if !ok {
+			messages, err := client.List(ctx, cred, opt)
+			return ListResult{Messages: messages}, err
+		}
+		return lister.ListWithUnread(ctx, cred, opt)
+	})
+}
+
 func (c *Chain) Detail(ctx context.Context, cred Credential, folder Folder, id, idMode string) (*Detail, error) {
 	return runChain(ctx, c, cred, func(client Client) (*Detail, error) {
 		return client.Detail(ctx, cred, folder, id, idMode)
