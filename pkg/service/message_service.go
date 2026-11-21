@@ -396,8 +396,28 @@ func (s *MessageService) batch(
 	if err == nil {
 		// 列表内容已经变了(标已读/删除),缓存必须失效。
 		s.invalidateMessageCache(tenantID, accountID)
+		// 逐封失败仍然返回 200,原因只写在响应体里;服务端不留一条的话,
+		// 用户报「有 10 封操作失败」时日志里只剩下一个成功的请求。
+		if result.Failed > 0 {
+			slog.Warn("邮件批量操作部分失败",
+				"account_id", accountID,
+				"succeeded", result.Succeeded,
+				"failed", result.Failed,
+				"reason", firstItemError(result.Items),
+			)
+		}
 	}
 	return result, err
+}
+
+// firstItemError 取第一条失败原因,用于日志。
+func firstItemError(items []mailer.ItemResult) string {
+	for _, item := range items {
+		if !item.OK {
+			return item.Error
+		}
+	}
+	return ""
 }
 
 // credential 取出账号并解密成协议层要的 Credential。

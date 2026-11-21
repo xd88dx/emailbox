@@ -1,7 +1,13 @@
 import { Button } from "@cloudflare/kumo/components/button";
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown";
 import { EnvelopeOpen, Trash } from "@phosphor-icons/react";
-import { mailApi, type Message, type MessageRef, type TenantRef } from "@/api/mail";
+import {
+  mailApi,
+  type Message,
+  type MessageBatchResult,
+  type MessageRef,
+  type TenantRef,
+} from "@/api/mail";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { toRef } from "./messageRef";
 
@@ -30,14 +36,25 @@ export function MessageBatchActions({
 
   // 后端逐封返回成功与否(部分失败是常态:一封信可能已经在别处被删了),
   // 只把 ok 的那些应用到界面上,失败的留在原地并把条数说清楚。
+  //
+  // 还要带上第一封的失败原因:只说「有 10 封操作失败」,用户既不知道
+  // 是授权过期还是邮箱只读,也不知道下一步该做什么。这条文案会一直留到
+  // 下一次操作,所以措辞必须读起来是「上一次操作的结果」,
+  // 不能让人以为它描述的是当前选中的这几封。
   const act = (
-    call: () => Promise<{ items: { ref: MessageRef; ok: boolean }[]; failed: number }>,
+    label: string,
+    call: () => Promise<MessageBatchResult>,
     apply: (done: MessageRef[]) => void,
   ) =>
     void run(async () => {
       const result = await call();
       apply(result.items.filter((i) => i.ok).map((i) => i.ref));
-      if (result.failed > 0) throw new Error(`有 ${result.failed} 封操作失败`);
+      if (result.failed > 0) {
+        const reason = result.items.find((i) => !i.ok)?.error?.slice(0, 120);
+        throw new Error(
+          `${label}有 ${result.failed} 封失败${reason ? `(${reason})` : ""},失败的邮件仍留在列表中`,
+        );
+      }
     });
 
   return (
@@ -66,6 +83,7 @@ export function MessageBatchActions({
             icon={EnvelopeOpen}
             onClick={() =>
               act(
+                "标记已读",
                 () => mailApi.markMessagesRead(tenantID, accountID, refs).then((r) => r.data),
                 onRead,
               )
@@ -78,6 +96,7 @@ export function MessageBatchActions({
             variant="danger"
             onClick={() =>
               act(
+                "删除",
                 () => mailApi.deleteMessages(tenantID, accountID, refs).then((r) => r.data),
                 onDelete,
               )
