@@ -42,7 +42,7 @@ export function MessageBatchActions({
 
   return (
     <>
-      <span className="ml-auto shrink-0 text-xs text-kumo-subtle tabular-nums">
+      <span className="shrink-0 text-xs text-kumo-subtle tabular-nums">
         已选中 {messages.length} 封
       </span>
       <DropdownMenu>
@@ -53,7 +53,15 @@ export function MessageBatchActions({
             </Button>
           }
         />
-        <DropdownMenu.Content side="bottom" align="end" sideOffset={4} className="min-w-32">
+        {/* portal 挂在 body 下,而邮件面板自己是 z-20 的层叠上下文;
+            不给 positioner 一个更高的层级,菜单会被面板盖住,表现为「点了没反应」。 */}
+        <DropdownMenu.Content
+          side="bottom"
+          align="start"
+          sideOffset={4}
+          className="min-w-32"
+          style={{ zIndex: 60 }}
+        >
           <DropdownMenu.Item
             icon={EnvelopeOpen}
             onClick={() =>

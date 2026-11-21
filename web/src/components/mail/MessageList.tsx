@@ -289,7 +289,6 @@ export function MessageList({
           onCheckedChange={toggleAllVisible}
           aria-label="全选当前列表的邮件"
         />
-        <MessageFilterPills value={readFilter} onChange={setReadFilter} counts={counts} />
         <MessageBatchActions
           tenantID={tenantID}
           accountID={accountID}
@@ -297,6 +296,7 @@ export function MessageList({
           onRead={applyRead}
           onDelete={applyDelete}
         />
+        <MessageFilterPills value={readFilter} onChange={setReadFilter} counts={counts} />
       </div>
 
       {view.error && <p className="px-3 py-2 text-sm text-kumo-danger">{view.error}</p>}
