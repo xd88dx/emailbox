@@ -186,14 +186,20 @@ export function MessageList({
   const applyRead = useCallback(
     (done: MessageRef[]) => {
       const keys = new Set(done.map(refKey));
+      // 默认保留选中:标已读后用户常常还要对同一批邮件做下一步(删除)。
+      // 但「未读」筛选下这些行会立刻从列表里消失,留着选中等于让操作条
+      // 对看不见的邮件生效,所以只在这种情况下把成功的那些移出选中。
       patch(key, (prev) => ({
         ...prev,
         items: prev.items.map((m) => (keys.has(refKey(m)) ? { ...m, is_read: true } : m)),
-        selected: new Set(),
+        selected:
+          readFilter === "unread"
+            ? new Set([...prev.selected].filter((k) => !keys.has(k)))
+            : prev.selected,
       }));
       onAccountsChanged?.();
     },
-    [key, patch, onAccountsChanged],
+    [key, patch, readFilter, onAccountsChanged],
   );
 
   const applyDelete = useCallback(

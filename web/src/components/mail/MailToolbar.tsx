@@ -86,7 +86,8 @@ export function MailToolbar({ tenantID, onReload, onExport }: MailToolbarProps) 
     void run(async () => {
       const resp = await jobApi.submitMarkRead(tenantID, ids);
       startJob(resp.data.id, "read");
-      clear();
+      // 不清空选中:标已读往往只是这批账号处理的第一步,清掉后用户要重新勾一遍
+      // 才能接着删除/停用;任务结束后列表会重取,选中项按 id 继续保留。
     });
 
   const stopJob = () =>
