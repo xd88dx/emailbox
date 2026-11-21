@@ -186,7 +186,13 @@ function AccountRow({
   // 任务结束后库里的值才是最新的，继续用快照会把刚减少的未读数盖回去。
   const displayUnread = (unreadFromCheck ? check?.unread : undefined) ?? account.unread_count;
   const checkFailed = check?.status === "failed";
-  const checkedNoMail = check?.status === "success" && check.unread === 0;
+  // 绿点表达「查过,确实没有未读」。不能只看 displayUnread === 0:unread_count
+  // 的默认值同样是 0,从没检查过的账号会被误标成「已检查无新邮件」。
+  // unread_checked_at 由收信检查与列表刷新写回,是这个 0 来自检查的凭据——
+  // 之前只认本轮任务的结果,页面重开后历史检查过的账号就失去了绿点。
+  const checkedNoMail =
+    (check?.status === "success" && check.unread === 0) ||
+    (displayUnread === 0 && account.unread_checked_at !== null);
 
   return (
     <div
