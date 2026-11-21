@@ -1,0 +1,13 @@
+# 全仓库统一 LF。Windows 的 core.autocrlf 会让不同机器检出不同行尾,
+# 于是 diff、gofmt、prettier 都会把整文件算成改动。这里显式钉死,
+# 不再依赖每个人的本地 git 配置。
+* text=auto eol=lf
+
+# Windows 原生脚本必须 CRLF,cmd/PowerShell 对 LF 解析不可靠
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# 二进制,禁止任何行尾转换
+*.ico binary
+*.png binary

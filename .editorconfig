@@ -1,0 +1,11 @@
+# 编辑器的兜底:.gitattributes 管 Git 怎么存,这里管编辑器怎么写。
+# 只约束行尾与编码;缩进交给 gofmt / prettier,避免两个真源打架。
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+
+[*.{ps1,cmd,bat}]
+end_of_line = crlf
