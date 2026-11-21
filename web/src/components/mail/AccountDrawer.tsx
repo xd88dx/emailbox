@@ -57,7 +57,9 @@ export function AccountDrawer({ tenantID, account, groups, onClose, onSaved }: A
   }
 
   return (
-    <aside className="flex w-96 shrink-0 flex-col border-l border-kumo-line bg-kumo-elevated">
+    // z-30 必须高于收件箱面板(MailPage 里那个 z-20):面板收起时只是
+    // translate-x-full 移出账号栏,仍带着白底盖在本抽屉头上,抽屉会变成一块空白。
+    <aside className="relative z-30 flex w-96 shrink-0 flex-col border-l border-kumo-line bg-kumo-elevated">
       <header className="flex items-start justify-between gap-2 border-b border-kumo-line px-4 py-3">
         <div className="min-w-0">
           <h2 className="truncate font-medium">{account.email}</h2>
