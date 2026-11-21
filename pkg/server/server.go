@@ -51,7 +51,9 @@ type Server struct {
 	jobs      *job.Manager
 	store     *repo.Store
 	scheduler *service.RefreshScheduler
-	address   string
+	// messages 只用来在退出时关掉 IMAP 会话池里的空闲连接。
+	messages *service.MessageService
+	address  string
 	// desktop 仅在桌面形态下非空。
 	desktop *desktopEntry
 }
@@ -73,7 +75,7 @@ func New(opts Options) (*Server, error) {
 		return nil, err
 	}
 
-	s := &Server{jobs: svc.jobs, store: store, scheduler: svc.scheduler, address: listenAddress(opts)}
+	s := &Server{jobs: svc.jobs, store: store, scheduler: svc.scheduler, messages: svc.messages, address: listenAddress(opts)}
 	if opts.Desktop {
 		entry, err := newDesktopEntry(context.Background(), store, svc.auth)
 		if err != nil {
@@ -117,6 +119,7 @@ type services struct {
 	auth       *service.AuthService
 	jobs       *job.Manager
 	scheduler  *service.RefreshScheduler
+	messages   *service.MessageService
 	handlers   api.Handlers
 	authMW     *middleware2.AuthMiddleware
 	tenantMW   *middleware2.TenantMiddleware
@@ -147,6 +150,15 @@ func buildServices(store *repo.Store, desktop bool) (*services, error) {
 		OAuthClientID: configs.AppConfig.OAuth.Microsoft.ClientID, OAuthClientSecret: configs.AppConfig.OAuth.Microsoft.ClientSecret,
 		GoogleOAuthClientID: configs.AppConfig.OAuth.Google.ClientID, GoogleOAuthClientSecret: configs.AppConfig.OAuth.Google.ClientSecret,
 		TLSLegacy: configs.AppConfig.Mailer.TLSLegacy,
+	})
+	translationService := service.NewTranslationService(messageService, quotaService, service.TranslationOptions{
+		LLMBaseURL:       configs.AppConfig.Translate.LLMBaseURL,
+		LLMAPIKey:        configs.AppConfig.Translate.LLMAPIKey,
+		LLMModel:         configs.AppConfig.Translate.LLMModel,
+		LLMTimeout:       time.Duration(configs.AppConfig.Translate.LLMTimeoutSeconds) * time.Second,
+		FallbackProvider: configs.AppConfig.Translate.FallbackProvider,
+		FallbackURL:      configs.AppConfig.Translate.FallbackURL,
+		FallbackAPIKeys:  configs.AppConfig.Translate.FallbackAPIKeys,
 	})
 	oauthService := service.NewOAuthService(store, cipher, quotaService, messageService, service.OAuthOptions{
 		Microsoft: service.OAuthProviderOptions{Enabled: configs.AppConfig.OAuth.Microsoft.Enabled, ClientID: configs.AppConfig.OAuth.Microsoft.ClientID,
@@ -197,12 +209,13 @@ func buildServices(store *repo.Store, desktop bool) (*services, error) {
 		auth:      authService,
 		jobs:      jobManager,
 		scheduler: service.NewRefreshScheduler(store, refreshService),
+		messages:  messageService,
 		handlers: api.Handlers{
 			Auth: handler.NewAuthHandler(authService, desktop), APIKey: handler.NewAPIKeyHandler(apiKeyService),
 			User: handler.NewUserHandler(service.NewUserService(store)), Tenant: handler.NewTenantHandler(service.NewTenantService(store)),
 			Member: handler.NewMemberHandler(service.NewMemberService(store)), Group: handler.NewGroupHandler(groupService),
 			Account: handler.NewAccountHandler(accountService), Quota: handler.NewQuotaHandler(service.NewQuotaService(store, quotaService)),
-			Message: handler.NewMessageHandler(messageService),
+			Message: handler.NewMessageHandler(messageService, translationService),
 			Admin:   handler.NewAdminHandler(adminService),
 			Billing: handler.NewBillingHandler(billingService),
 			Job:     handler.NewJobHandler(service.NewJobService(store, jobManager), refreshService),
@@ -304,6 +317,11 @@ func (s *Server) Run(ctx context.Context, onListen func(addr net.Addr)) error {
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownGrace)
 	s.jobs.Shutdown(shutdownCtx)
 	cancelShutdown()
+	// 池里的空闲 IMAP 连接不主动关,进程退出时能拖住 go-imap 的读协程,
+	// 在测试里表现为 goroutine 泄漏。
+	if s.messages != nil {
+		s.messages.Close()
+	}
 	closeDatabase()
 	return err
 }

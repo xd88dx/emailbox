@@ -26,6 +26,7 @@ type PublicPlan struct {
 	MaxAccounts    int    `json:"max_accounts"`
 	MaxGroups      int    `json:"max_groups"`
 	DailyMailFetch int    `json:"daily_mail_fetch"`
+	DailyTranslate int    `json:"daily_translate"`
 }
 
 type PublicPaidPlan struct {

@@ -15,6 +15,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"golang.org/x/net/html"
 	"golang.org/x/text/encoding/htmlindex"
 	"golang.org/x/text/transform"
 )
@@ -308,6 +309,77 @@ func HTMLToPreview(html string, limit int) string {
 		return string(runes[:limit]) + "…"
 	}
 	return text
+}
+
+// HTMLToText 把 HTML 正文转成保留段落边界的纯文本,供翻译使用。
+//
+// 与 HTMLToPreview 的取舍不同:摘要只要一行,翻译需要段落分隔,否则整封信
+// 会被翻成一整段。script/style/head 不参与;块级元素前后换行。
+// 不做安全净化——译文只作为纯文本展示,原文仍走前端的 DOMPurify + sandbox。
+func HTMLToText(input string) string {
+	doc, err := html.Parse(strings.NewReader(input))
+	if err != nil {
+		return strings.Join(strings.Fields(htmlUnescape(htmlTag.ReplaceAllString(input, " "))), " ")
+	}
+	var b strings.Builder
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.ElementNode {
+			switch n.Data {
+			case "script", "style", "noscript", "head", "title":
+				return
+			}
+		}
+		if n.Type == html.TextNode {
+			b.WriteString(n.Data)
+			return
+		}
+		// br 是行内换行,只能产生一个换行;按块级元素处理会变成空行。
+		if n.Type == html.ElementNode && n.Data == "br" {
+			b.WriteString("\n")
+			return
+		}
+		if n.Type == html.ElementNode && isBlockElement(n.Data) {
+			b.WriteString("\n")
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+		if n.Type == html.ElementNode && isBlockElement(n.Data) {
+			b.WriteString("\n")
+		}
+	}
+	walk(doc)
+	return normalizePlainText(b.String())
+}
+
+func isBlockElement(tag string) bool {
+	switch tag {
+	case "p", "div", "li", "tr", "table", "blockquote", "pre",
+		"h1", "h2", "h3", "h4", "h5", "h6", "hr":
+		return true
+	}
+	return false
+}
+
+// normalizePlainText 合并行内空白、压掉连续空行,但不把段落揉成一行。
+func normalizePlainText(s string) string {
+	lines := strings.Split(s, "\n")
+	out := make([]string, 0, len(lines))
+	blank := true
+	for _, line := range lines {
+		line = strings.Join(strings.Fields(line), " ")
+		if line == "" {
+			if !blank && len(out) > 0 {
+				out = append(out, "")
+			}
+			blank = true
+			continue
+		}
+		out = append(out, line)
+		blank = false
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
 var htmlEntities = strings.NewReplacer(

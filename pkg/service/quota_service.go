@@ -17,6 +17,7 @@ type QuotaUsage struct {
 		Groups       int `json:"groups"`
 		MailFetch    int `json:"mail_fetch"`
 		TokenRefresh int `json:"token_refresh"`
+		Translate    int `json:"translate"`
 	} `json:"usage"`
 	// Day 是频次类用量的统计日期（按租户时区），供前端说明「明日重置」。
 	Day string `json:"day"`
@@ -49,6 +50,9 @@ func (s *QuotaService) Usage(ctx context.Context, tenantID string) (*QuotaUsage,
 		return nil, err
 	}
 	if out.Usage.TokenRefresh, err = s.quota.Usage(ctx, tenantID, model.MetricTokenRefresh); err != nil {
+		return nil, err
+	}
+	if out.Usage.Translate, err = s.quota.Usage(ctx, tenantID, model.MetricTranslate); err != nil {
 		return nil, err
 	}
 	return out, nil

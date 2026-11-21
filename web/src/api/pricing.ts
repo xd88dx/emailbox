@@ -5,6 +5,7 @@ export interface PublicPlan {
   max_accounts: number;
   max_groups: number;
   daily_mail_fetch: number;
+  daily_translate: number;
 }
 
 export interface PublicPlanPrice {

@@ -16,7 +16,10 @@ const (
 	CodeQuotaExceeded    = 1001 // 超出配额，data 为 null，上限与已用量在 message 里
 	CodeAccountDisabled  = 1003 // 用户已被管理员禁用
 	CodeMailAccountExist = 1004 // 邮箱账号已存在
-	CodeUpstreamMailErr  = 1005 // 上游邮件服务失败，data 带 {error_kind, channel}
+	CodeUpstreamMailErr  = 1005 // 上游邮件服务失败,data 带 {error_kind, channel}
+	// CodeTranslateUnavailable 表示首选与兜底翻译引擎都没成功。
+	// 前端保留原文并内联提示,不把用户踢出当前页面。
+	CodeTranslateUnavailable = 1006
 )
 
 func success(c *echo.Context, data any, message string) error {

@@ -24,6 +24,8 @@ export interface AuthResponse {
   // 服务端是否跑在桌面形态里。只影响界面上给不给「退出」入口——
   // 桌面版的本地账号密码随机生成且从不展示，退出之后登录框没人填得出来。
   desktop: boolean;
+  // 部署侧是否配置了翻译引擎。没有时详情页不显示翻译按钮。
+  translation_enabled: boolean;
 }
 // 注册只要用户名和密码。邮箱是登录后可填、也可以一直不填的资料字段。
 export interface RegisterRequest {

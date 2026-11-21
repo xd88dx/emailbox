@@ -57,7 +57,10 @@ export default function UsagePage() {
     { label: "邮箱账号", used: usage.accounts, limit: limits.max_accounts },
     { label: "分组", used: usage.groups, limit: limits.max_groups },
   ];
-  const daily = [{ label: "今日拉取邮件", used: usage.mail_fetch, limit: limits.daily_mail_fetch }];
+  const daily = [
+    { label: "今日拉取邮件", used: usage.mail_fetch, limit: limits.daily_mail_fetch },
+    { label: "今日翻译", used: usage.translate, limit: limits.daily_translate },
+  ];
   const overQuota = counted.filter((q) => q.limit !== UNLIMITED && q.used > q.limit);
 
   return (

@@ -185,6 +185,7 @@ type Plan struct {
 	DailyMailFetch int32
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	DailyTranslate int32
 }
 
 type PlanPrice struct {

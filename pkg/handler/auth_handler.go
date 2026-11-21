@@ -29,6 +29,7 @@ func NewAuthHandler(s *service.AuthService, desktop bool) *AuthHandler {
 // 在下一次有人给前端加一个登录后跳转时就会失效。
 func (h *AuthHandler) respondAuth(c *echo.Context, v *model.AuthResponse, msg string) error {
 	v.Desktop = h.desktop
+	v.TranslationEnabled = configs.AppConfig.Translate.Enabled()
 	return success(c, v, msg)
 }
 

@@ -94,6 +94,10 @@ func newTestServerWithMailOptions(t *testing.T, mailOptions service.ChainOptions
 	}
 	store := repo.NewStore(db, "sqlite")
 	apiKeyService := service.NewAPIKeyService(store, testCipher(t))
+	// 邮件端点接一个假通道:真实回退链要连微软与各家 IMAP,
+	// 这里要测的是路由、越权与参数校验,不是协议本身。
+	messageAPI := service.NewMessageService(store, testCipher(t), quota.NewService(store), service.ChainOptions{}).
+		WithChainFactory(testMailClient)
 	handlers := api.Handlers{
 		// false：路由用例测的是网页形态，桌面形态由 pkg/server 的用例覆盖。
 		Auth:   handler.NewAuthHandler(service.NewAuthService(store), false),
@@ -107,10 +111,8 @@ func newTestServerWithMailOptions(t *testing.T, mailOptions service.ChainOptions
 		Quota: handler.NewQuotaHandler(service.NewQuotaService(store, quota.NewService(store))),
 		// 邮件端点接一个假通道：真实回退链要连微软与各家 IMAP，
 		// 这里要测的是路由、越权与参数校验，不是协议本身。
-		Message: handler.NewMessageHandler(
-			service.NewMessageService(store, testCipher(t), quota.NewService(store), service.ChainOptions{}).
-				WithChainFactory(testMailClient),
-		),
+		Message: handler.NewMessageHandler(messageAPI,
+			service.NewTranslationService(messageAPI, quota.NewService(store), service.TranslationOptions{})),
 	}
 	platformService := service.NewPlatformService(store, service.NewAuthService(store))
 
@@ -433,11 +435,12 @@ func TestPublicPricing(t *testing.T) {
 		t.Fatal(err)
 	}
 	free.Name, free.MaxAccounts, free.MaxGroups, free.DailyMailFetch = "入门版", 37, 6, 321
+	free.DailyTranslate = 222
 	if err := store.UpdatePlan(ctx, *free); err != nil {
 		t.Fatal(err)
 	}
 	for _, plan := range []model.Plan{
-		{ID: "pro", Code: "pro", Name: "专业版", MaxAccounts: 500, MaxGroups: 50, DailyMailFetch: model.Unlimited},
+		{ID: "pro", Code: "pro", Name: "专业版", MaxAccounts: 500, MaxGroups: 50, DailyMailFetch: model.Unlimited, DailyTranslate: 999},
 		{ID: "draft", Code: "draft", Name: "尚未开售的内部套餐", MaxAccounts: 1000},
 		{ID: "admin", Code: "admin", Name: "管理员专用套餐", MaxAccounts: model.Unlimited},
 	} {
@@ -477,6 +480,7 @@ func TestPublicPricing(t *testing.T) {
 		if enabled {
 			paidPlans = append(paidPlans, map[string]any{
 				"name": "专业版", "max_accounts": float64(500), "max_groups": float64(50), "daily_mail_fetch": float64(-1),
+				"daily_translate": float64(999),
 				"prices": []any{
 					map[string]any{"billing_period": "monthly", "currency": "USD", "amount": "9.90"},
 					map[string]any{"billing_period": "yearly", "currency": "USD", "amount": "99.00"},
@@ -489,6 +493,7 @@ func TestPublicPricing(t *testing.T) {
 				"billing_enabled": enabled,
 				"free_plan": map[string]any{
 					"name": "入门版", "max_accounts": float64(37), "max_groups": float64(6), "daily_mail_fetch": float64(321),
+					"daily_translate": float64(222),
 				},
 				"paid_plans": paidPlans,
 			},

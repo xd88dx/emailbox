@@ -51,6 +51,9 @@ func newMailChain(s *MessageService, account *model.MailAccount, opt ChainOption
 	onRotate := func(_, refreshToken string) {
 		s.OnTokenRotated(hookCtx(), account.TenantID, account.ID, refreshToken)
 	}
+	// 会话池按账号隔离。同一账号在不同通道/代理上会各自成键,
+	// 因此 Graph 与 IMAP 的成功会话不会互相顶掉。
+	poolScope := account.TenantID + "|" + account.ID
 
 	chain := mailer.NewChain(map[string]mailer.Client{
 		mailer.ChannelGraph: graph.New(graph.Config{
@@ -62,6 +65,8 @@ func newMailChain(s *MessageService, account *model.MailAccount, opt ChainOption
 			Channel:        mailer.ChannelIMAPNew,
 			Timeout:        opt.Timeout,
 			TLSLegacy:      opt.TLSLegacy,
+			Pool:           s.pool,
+			PoolScope:      poolScope,
 			TokenURL:       opt.TokenURL,
 			OnTokenRefresh: onRotate,
 		}),
@@ -69,6 +74,8 @@ func newMailChain(s *MessageService, account *model.MailAccount, opt ChainOption
 			Channel:        mailer.ChannelIMAPOld,
 			Timeout:        opt.Timeout,
 			TLSLegacy:      opt.TLSLegacy,
+			Pool:           s.pool,
+			PoolScope:      poolScope,
 			TokenURL:       opt.TokenURL,
 			OnTokenRefresh: onRotate,
 		}),
@@ -76,6 +83,8 @@ func newMailChain(s *MessageService, account *model.MailAccount, opt ChainOption
 			Channel:        mailer.ChannelIMAPGmail,
 			Timeout:        opt.Timeout,
 			TLSLegacy:      opt.TLSLegacy,
+			Pool:           s.pool,
+			PoolScope:      poolScope,
 			TokenURL:       opt.TokenURL,
 			OnTokenRefresh: onRotate,
 		}),
@@ -83,6 +92,8 @@ func newMailChain(s *MessageService, account *model.MailAccount, opt ChainOption
 			Channel:   mailer.ChannelIMAP,
 			Timeout:   opt.Timeout,
 			TLSLegacy: opt.TLSLegacy,
+			Pool:      s.pool,
+			PoolScope: poolScope,
 		}),
 	})
 	previous := account.AuthChannel

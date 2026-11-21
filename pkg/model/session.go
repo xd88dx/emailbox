@@ -23,4 +23,7 @@ type AuthResponse struct {
 	// 也不用 Cookie——Cookie 不区分端口，桌面版在 127.0.0.1 上种下的标志会被
 	// 同一台机器上 Docker 发布在 127.0.0.1:1323 的实例读到，把网页版的入口一起藏掉。
 	Desktop bool `json:"desktop"`
+	// TranslationEnabled 表示部署侧至少配置了一种翻译引擎。
+	// 与 Desktop 同一思路搭在会话响应上:前端据此决定是否显示翻译按钮。
+	TranslationEnabled bool `json:"translation_enabled"`
 }

@@ -14,6 +14,8 @@ interface AuthState {
   // 服务端的形态，不是会话的一部分：登出、会话失效都不该把它清掉，
   // 一个进程不会因为没人登录就不再是桌面版了。
   desktop: boolean;
+  // 部署能力,和 desktop 一样不随登出清掉:同一进程的配置不会因为没人登录就变。
+  translationEnabled: boolean;
   loadSession: () => Promise<AuthResponse | null>;
   login: (data: LoginRequest) => Promise<AuthResponse>;
   register: (data: RegisterRequest) => Promise<AuthResponse>;
@@ -33,12 +35,19 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   loading: true,
   desktop: false,
+  translationEnabled: false,
   loadSession: async () => {
     if (sessionInFlight) return sessionInFlight;
     sessionInFlight = (async () => {
       try {
         const r = await userApi.session();
-        set({ user: r.data.user, isAuthenticated: true, loading: false, desktop: r.data.desktop });
+        set({
+          user: r.data.user,
+          isAuthenticated: true,
+          loading: false,
+          desktop: r.data.desktop,
+          translationEnabled: r.data.translation_enabled,
+        });
         return r.data;
       } catch {
         set({ user: null, isAuthenticated: false, loading: false });
@@ -54,12 +63,22 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   login: async (data) => {
     const r = await userApi.login(data);
-    set({ user: r.data.user, isAuthenticated: true, desktop: r.data.desktop });
+    set({
+      user: r.data.user,
+      isAuthenticated: true,
+      desktop: r.data.desktop,
+      translationEnabled: r.data.translation_enabled,
+    });
     return r.data;
   },
   register: async (data) => {
     const r = await userApi.register(data);
-    set({ user: r.data.user, isAuthenticated: true, desktop: r.data.desktop });
+    set({
+      user: r.data.user,
+      isAuthenticated: true,
+      desktop: r.data.desktop,
+      translationEnabled: r.data.translation_enabled,
+    });
     return r.data;
   },
   logout: async () => {

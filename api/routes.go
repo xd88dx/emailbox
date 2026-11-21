@@ -194,6 +194,8 @@ func mountMailRoutes(m *echo.Group, h Handlers, exportLimiter echo.MiddlewareFun
 		middleware.Require(model.PermissionMessageRead))
 	msg.GET("/:messageID/attachments.zip", h.Message.AttachmentsZip,
 		middleware.Require(model.PermissionMessageRead))
+	msg.POST("/:messageID/translate/stream", h.Message.TranslateStream,
+		middleware.Require(model.PermissionMessageRead), middleware.DenyAPIKey)
 	msg.POST("/read", h.Message.MarkRead, middleware.Require(model.PermissionMessageWrite))
 	msg.POST("/delete", h.Message.Delete, middleware.Require(model.PermissionMessageWrite))
 

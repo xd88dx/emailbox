@@ -45,6 +45,7 @@ SQL 里的 `WHERE tenant_id = ?` 永不放宽——理由与实现见 [08 文档
 | `1003` | 403 | `ACCOUNT_DISABLED` — 用户已被管理员禁用 |
 | `1004` | 409 | `MAIL_ACCOUNT_EXISTS` — 邮箱已存在 |
 | `1005` | 502 | `UPSTREAM_MAIL_ERROR` — 上游邮件服务失败，`data` 带 `{error_kind, channel}` |
+| `1006` | 502 | `TRANSLATE_UNAVAILABLE` — 首选与兜底翻译引擎都没成功;前端保留原文并内联提示 |
 
 > **1005 的状态码细分**（`handler.upstreamFailure`）：`banned` / `account_unavailable` → 409、`rate_limited` → 429、
 > `folder_unavailable` → 404、`canceled` → 504；其余（含 `auth_failed` / `consent_required`）
@@ -267,10 +268,22 @@ POST /mail/accounts/export         权限 account:secret
 | GET | `/mail/accounts/:accountID/messages/:messageID` | message:read | `folder`、`id_mode` 必须透传 |
 | GET | `.../messages/:messageID/attachments/:attachmentID` | message:read | 二进制流下载 |
 | GET | `.../messages/:messageID/attachments.zip` | message:read | 全部附件打包 |
+| POST | `.../messages/:messageID/translate/stream` | message:read | SSE 翻译正文;`folder`、`id_mode` 必须透传。API Key 一律 403 |
 | POST | `.../messages/read` | message:write | `{items:[{id, folder, id_mode}]}` 批量标已读 |
 | POST | `.../messages/delete` | message:write | 同上，批量永久删除 |
 
 响应里必须回传 `channel`（本次实际走通的通道），前端据此显示实际走通的链路。
+
+**翻译**(2026-11-22):`POST .../translate/stream` 用 SSE 推送。`event: result` 的
+`data` 为 `{text, engine, truncated, cached, final}`:快引擎先到先发 `final:false`,
+大模型结果到达后再推一帧 `final:true` 替换;大模型失败时保留快引擎结果,两个都失败
+才推 `event: error`(`code:1006`)。客户端断开连接会取消两个引擎的调用。账号不属于本租户、
+未启用、超额、正文为空这些预检失败仍返回普通 JSON 错误。
+正文由服务端重新取,不接受前端上传——否则它会变成租户可用的通用翻译代理。
+配额走 `translate` 指标(套餐的 `daily_translate`),在打翻译服务之前预扣;取详情
+本身不扣 `daily_mail_fetch`。API Key 被 `middleware.DenyAPIKey` 明确拒绝:Key 是
+只读且零成本的脚本通道,翻译要调用付费外部服务。该端点**不登记**进 `APIEndpoints`,
+`/llms.txt` 不会给出一个必然 403 的接口。
 
 > 响应里还有一个 `source` 字段，恒为 `remote`。它是给已删除的「本地邮件保留」
 > 预留的位置（那些能力已移出范围，见 [README](README.md)），现在没有第二个取值。

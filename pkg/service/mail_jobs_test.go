@@ -2,7 +2,10 @@ package service_test
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"emailbox/configs"
 	"emailbox/pkg/crypto"
@@ -371,5 +374,77 @@ func TestMailJobsWriteBackUnreadCount(t *testing.T) {
 	}
 	if stored.UnreadCount != 0 {
 		t.Errorf("标已读后未读数 = %d,期望 0", stored.UnreadCount)
+	}
+}
+
+// parallelListClient 让两个邮件夹的第一次拉取互相等待。
+// 只要 listAll 退回串行,先到的那次会等满超时,最终只拿得到一个邮件夹的结果。
+type parallelListClient struct {
+	*fakeMailClient
+	mu      sync.Mutex
+	arrived int
+	both    chan struct{}
+}
+
+func (f *parallelListClient) List(ctx context.Context, _ mailer.Credential, opt mailer.ListOptions) ([]mailer.Message, error) {
+	f.mu.Lock()
+	f.arrived++
+	if f.arrived == 2 {
+		close(f.both)
+	}
+	f.mu.Unlock()
+	select {
+	case <-f.both:
+	case <-time.After(2 * time.Second):
+		return nil, errors.New("另一个邮件夹没有同时在拉取")
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return []mailer.Message{{ID: string(opt.Folder), Folder: opt.Folder, ReceivedAt: time.Now()}}, nil
+}
+
+// folder=all 的两个邮件夹必须同时在场。串行实现下先到的那次会等到超时,
+// 最终只返回一个邮件夹的邮件——这正是「全部邮件」比收件箱慢一倍的原因。
+func TestListAllFetchesFoldersInParallel(t *testing.T) {
+	configs.AppConfig = &configs.Config{Session: configs.SessionConfig{ExpireHour: 24}}
+	store := testStore(t)
+	cipher, err := crypto.New("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := service.NewAuthService(store)
+	registered, _, err := auth.Register(context.Background(), model.RegisterRequest{
+		Username: "parallel", Email: "parallel@example.com", Password: "secret12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := registered.Tenants[0].ID
+	accounts := service.NewAccountService(store, cipher, quota.NewService(store))
+	created, err := accounts.Create(context.Background(), tenantID, model.CreateMailAccountRequest{
+		Email: "parallel@qq.com", Password: "authcode",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := &parallelListClient{fakeMailClient: &fakeMailClient{}, both: make(chan struct{})}
+	messages := service.NewMessageService(store, cipher, quota.NewService(store), service.ChainOptions{}).
+		WithChainFactory(func(*model.MailAccount) mailer.Client { return client })
+
+	result, err := messages.List(context.Background(), tenantID, created.ID,
+		mailer.ListOptions{Folder: mailer.FolderAll, Top: 10}, false)
+	if err != nil {
+		t.Fatalf("folder=all 拉取失败: %v", err)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("只拿到 %d 个邮件夹的结果,期望 2(说明是串行拉取)", len(result.Items))
+	}
+	seen := map[mailer.Folder]bool{}
+	for _, m := range result.Items {
+		seen[m.Folder] = true
+	}
+	if !seen[mailer.FolderInbox] || !seen[mailer.FolderJunk] {
+		t.Fatalf("结果缺少邮件夹: %+v", seen)
 	}
 }

@@ -7,9 +7,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"emailbox/pkg/crypto"
 	"emailbox/pkg/mailer"
+	"emailbox/pkg/mailer/imapx"
 	"emailbox/pkg/model"
 	"emailbox/pkg/quota"
 	"emailbox/pkg/repo"
@@ -46,15 +48,25 @@ type MessageService struct {
 	// 手动刷新(force)绕过它,否则用户按了刷新却看到同一份缓存。
 	cacheMu sync.Mutex
 	cache   map[string]messageCacheEntry
+	// pool 跨请求复用已登录的 IMAP 会话。它按账号隔离,且只由本服务持有——
+	// 做成包级变量会让不同租户的连接混在一起,那是最不该发生的一类串号。
+	pool *imapx.SessionPool
 }
 
 func NewMessageService(
 	store *repo.Store, cipher crypto.Cipher, q *quota.Service, opt ChainOptions,
 ) *MessageService {
 	s := &MessageService{store: store, cipher: cipher, quota: q, chainOptions: opt,
-		cache: make(map[string]messageCacheEntry)}
+		cache: make(map[string]messageCacheEntry), pool: imapx.NewSessionPool(imapx.PoolConfig{})}
 	s.chainFor = defaultChainFactory(s, opt)
 	return s
+}
+
+// Close 释放池里的空闲 IMAP 连接。服务退出时调用。
+func (s *MessageService) Close() {
+	if s.pool != nil {
+		s.pool.Close()
+	}
 }
 
 // WithChainFactory 换掉回退链的构造方式，只给测试用：
@@ -88,6 +100,22 @@ func (s *MessageService) List(
 		return nil, ErrInvalidFolder
 	}
 
+	start := time.Now()
+	cached := false
+	// 一行日志回答「这次打开邮箱到底慢在哪」:cached 说明有没有真的打上游,
+	// elapsed_ms 是用户感知的等待时间。协议层还会分别记建连与 FETCH 的耗时。
+	defer func() {
+		slog.Info("邮件列表请求完成",
+			"account_id", accountID,
+			"folder", opt.Folder,
+			"skip", opt.Skip,
+			"top", opt.Top,
+			"force", force,
+			"cached", cached,
+			"elapsed_ms", time.Since(start).Milliseconds(),
+		)
+	}()
+
 	account, cred, err := s.credential(ctx, tenantID, accountID)
 	if err != nil {
 		return nil, err
@@ -104,8 +132,9 @@ func (s *MessageService) List(
 			folder: string(opt.Folder), skip: opt.Skip, top: opt.Top,
 		})
 		if !force {
-			if cached, ok := s.cacheGet(cacheKey); ok {
-				return cached, nil
+			if hit, ok := s.cacheGet(cacheKey); ok {
+				cached = true
+				return hit, nil
 			}
 		}
 	}
@@ -151,15 +180,35 @@ func (s *MessageService) listAll(
 	ctx context.Context, client mailer.Client, record func(error),
 	cred mailer.Credential, opt mailer.ListOptions, wantUnread bool,
 ) (*MessageListResult, *int, error) {
+	folders := []mailer.Folder{mailer.FolderInbox, mailer.FolderJunk}
+	// 两个邮件夹互不依赖,各自从会话池取一条连接并行拉。串行时一次
+	// folder=all 要付两遍网络往返,这是「全部邮件」比收件箱慢一倍的原因。
+	type folderResult struct {
+		messages []mailer.Message
+		unread   *int
+		err      error
+	}
+	results := make([]folderResult, len(folders))
+	var wg sync.WaitGroup
+	for i, folder := range folders {
+		wg.Add(1)
+		go func(i int, folder mailer.Folder) {
+			defer wg.Done()
+			results[i].messages, results[i].unread, results[i].err = listMessages(
+				ctx, client, cred, mailer.ListOptions{
+					Folder: folder,
+					Skip:   0,
+					Top:    opt.Skip + opt.Top,
+				}, wantUnread && folder == mailer.FolderInbox)
+		}(i, folder)
+	}
+	wg.Wait()
+
 	merged := make([]mailer.Message, 0, opt.Top*2)
 	var firstErr error
 	var unread *int
-	for _, folder := range []mailer.Folder{mailer.FolderInbox, mailer.FolderJunk} {
-		part, count, err := listMessages(ctx, client, cred, mailer.ListOptions{
-			Folder: folder,
-			Skip:   0,
-			Top:    opt.Skip + opt.Top,
-		}, wantUnread && folder == mailer.FolderInbox)
+	for i, folder := range folders {
+		part, count, err := results[i].messages, results[i].unread, results[i].err
 		if err != nil {
 			// 一个邮件夹取不到不该让整个请求失败：多数账号的垃圾箱是可有可无的，
 			// 而收件箱拿到了就该展示出来。全都失败时才报错。

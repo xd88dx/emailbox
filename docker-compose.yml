@@ -11,6 +11,14 @@ services:
       # 只支持静态 RSA 的 IMAP 服务商(如新浪 993)需要打开。
       # 默认关闭,本机可在 .env 里设 IMAP_TLS_LEGACY=true。
       IMAP_TLS_LEGACY: ${IMAP_TLS_LEGACY:-false}
+      # 正文翻译(可选)。LLM 三项要么全配,要么全不配;兜底二选一。
+      # LLM_BASEURL: ${LLM_BASEURL:-}
+      # LLM_APIKEY: ${LLM_APIKEY:-}
+      # LLM_MODEL: ${LLM_MODEL:-}
+      # TRANSLATE_FALLBACK_PROVIDER: ${TRANSLATE_FALLBACK_PROVIDER:-}
+      # TRANSLATE_FALLBACK_URL: ${TRANSLATE_FALLBACK_URL:-}
+      # TRANSLATE_FALLBACK_APIKEY: ${TRANSLATE_FALLBACK_APIKEY:-}
+      # DeepL 可配多个 key,英文逗号分隔,按请求轮询摊平额度
     volumes:
       # 容器以非 root (uid 1000) 运行。Linux 主机上 compose 自动创建的目录属主是 root，
       # 首次启动前需要: mkdir -p data && sudo chown 1000:1000 data

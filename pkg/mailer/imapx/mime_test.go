@@ -365,3 +365,19 @@ func TestHTMLToPreview(t *testing.T) {
 		}
 	}
 }
+
+// 翻译需要段落边界,不能像摘要那样把整封信压成一行。
+// script/style 不参与,否则 CSS 与 JS 会被送进翻译模型。
+func TestHTMLToTextPreservesParagraphs(t *testing.T) {
+	input := `<html><head><style>.x{color:red}</style></head><body>` +
+		`<p>Hello &amp; welcome</p><div>Second line<br>next</div>` +
+		`<script>alert(1)</script></body></html>`
+	got := HTMLToText(input)
+	want := "Hello & welcome\n\nSecond line\nnext"
+	if got != want {
+		t.Fatalf("HTMLToText = %q, 期望 %q", got, want)
+	}
+	if strings.Contains(got, "color") || strings.Contains(got, "alert") {
+		t.Errorf("script/style 不应进入待翻译文本: %q", got)
+	}
+}

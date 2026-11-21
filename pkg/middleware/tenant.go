@@ -62,3 +62,18 @@ func TenantMember(c *echo.Context) *model.TenantMember {
 	}
 	return v
 }
+
+// DenyAPIKey 拒绝 API Key 访问某个端点。
+//
+// 翻译会调用付费的外部服务,不开放给无人值守的脚本;Key 的权限模型是只读,
+// 但「只读」不等于「零成本」。其余邮件接口仍由 Require 按权限矩阵放行。
+func DenyAPIKey(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		if member := TenantMember(c); member != nil && member.Role == model.TenantRoleAPI {
+			return c.JSON(http.StatusForbidden, map[string]any{
+				"code": 1, "data": nil, "message": "API Key 不支持翻译",
+			})
+		}
+		return next(c)
+	}
+}

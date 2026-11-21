@@ -145,6 +145,7 @@ function PlanLimits({ plan }: { plan: PublicPlan }) {
         { label: "托管邮箱", limit: plan.max_accounts, unit: "个" },
         { label: "邮箱分组", limit: plan.max_groups, unit: "个" },
         { label: "每日取件", limit: plan.daily_mail_fetch, unit: "次" },
+        { label: "每日翻译", limit: plan.daily_translate, unit: "次" },
       ].map(({ label, limit, unit }) => (
         <div key={label} className="flex flex-wrap justify-between gap-x-4 gap-y-1">
           <dt className="text-kumo-subtle">{label}</dt>

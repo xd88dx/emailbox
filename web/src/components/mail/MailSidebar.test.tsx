@@ -37,6 +37,7 @@ const LIMITS: Limits = {
   max_accounts: 50,
   max_groups: 20,
   daily_mail_fetch: 1000,
+  daily_translate: 200,
 };
 
 function mockQuota(maxGroups: number) {
@@ -45,7 +46,7 @@ function mockQuota(maxGroups: number) {
     message: "",
     data: {
       limits: { ...LIMITS, max_groups: maxGroups },
-      usage: { accounts: 0, groups: 0, mail_fetch: 0, token_refresh: 0 },
+      usage: { accounts: 0, groups: 0, mail_fetch: 0, token_refresh: 0, translate: 0 },
       day: "2026-08-27",
     },
   });

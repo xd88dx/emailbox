@@ -210,6 +210,47 @@ TLS1.2 的套件列表会额外包含 `TLS_RSA_WITH_*` 四条,同时保留默认
 注意:**Go 标准库没有 FFDHE 实现**,只支持 DHE 的服务器无法通过本开关解决,
 需要换 TLS 实现(如 OpenSSL 绑定),属于当前版本不支持的范围。
 
+## 正文翻译
+
+邮件详情页的「翻译成中文」是显式动作,只对登录用户开放(API Key 一律 403)。
+两个引擎同时发起:传统引擎的结果先到先显示,大模型结果返回后替换它;
+大模型失败时保留传统引擎的译文。两者都没有配置时功能对用户隐藏。
+
+```bash
+# 首选:OpenAI 兼容端点。三项必须同时配置,只配一半会启动失败。
+LLM_BASEURL=https://api.openai.com/v1
+LLM_APIKEY=
+LLM_MODEL=gpt-4o-mini
+# 单次翻译请求超时,默认 20 秒
+LLM_TIMEOUT_SECONDS=20
+
+# 兜底:libretranslate 或 deepl,二选一。
+TRANSLATE_FALLBACK_PROVIDER=libretranslate
+# 自建:LibreTranslate,数据不出你的服务器
+TRANSLATE_FALLBACK_URL=http://libretranslate:5000
+# DeepL Free 用 https://api-free.deepl.com。
+# 多个 key 用英文逗号分隔,按请求轮询;某个 key 额度用尽时自动换下一个。
+TRANSLATE_FALLBACK_APIKEY=key1:fx,key2:fx
+```
+
+- 未配置 `LLM_*` 时直接使用兜底;两者都未配置时详情页不显示翻译按钮。
+- `LLM_BASEURL` 要写到版本前缀(如 `https://api.openai.com/v1`):程序只在后面追加
+  `/chat/completions`。中转网关漏掉 `/v1` 常回一个 200 的 HTML 首页,表现为「响应无法解析」。
+- 两个引擎同时调用:传统引擎先返回就先显示,界面上标注「大模型翻译中...」;
+  大模型结果到达后替换。大模型报错或超时后熔断 60 秒,期间只显示传统引擎的译文。
+  切换邮件或关闭详情会取消两个引擎的调用。
+- `LLM_TIMEOUT_SECONDS` 只限制大模型这一次调用。配了传统引擎时首个译文不受它影响,
+  免费中转慢可以调到 60 秒,让替换有机会完成;只配大模型时调大意味着用户空等更久。
+- DeepL 可以配多个 key(英文逗号分隔),按请求轮询摊平额度;遇到 401/403/429/456
+  会在同一次调用里换下一个 key。LibreTranslate 只支持一个 key,配多个会启动失败。
+- DeepL 免费版(Developer 计划)的 100 万字符是**一次性总额,用完不会重置**,
+  `GET /v2/usage` 可以查已用量。长期使用请自建 LibreTranslate、升级付费计划,
+  或配置多个免费账号的 key 轮询。
+- 正文按段落分块(每块 4000 字符、最多 3 块并发);超过 3.2 万字符只翻译前段并在界面上提示。
+- 译文在内存里缓存 10 分钟。每次点击仍计一次套餐的 `daily_translate` 配额。
+- 正文会发送到配置的翻译服务;自建 LibreTranslate 时数据不离开服务器。
+- HTML 正文先转成纯文本再翻译,译文单独展示;原文的净化与 sandbox 渲染链路不变。
+
 ## Waffo 订阅支付
 
 Waffo 由 Go 服务端通过 HTTP API 直连，数据模型、路由与事件状态机见

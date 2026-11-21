@@ -15,17 +15,17 @@ SELECT * FROM plans ORDER BY created_at;
 INSERT INTO plans (
     id, code, name, is_default,
     max_accounts, max_groups,
-    daily_mail_fetch
-) VALUES ($1, $2, $3, $4, $5, $6, $7);
+    daily_mail_fetch, daily_translate
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
 -- code is not updatable: it is the stable identifier other systems key off.
 -- name: UpdatePlan :execrows
 UPDATE plans
 SET name = $1, is_default = $2,
     max_accounts = $3, max_groups = $4,
-    daily_mail_fetch = $5,
+    daily_mail_fetch = $5, daily_translate = $6,
     updated_at = CURRENT_TIMESTAMP
-WHERE id = $6;
+WHERE id = $7;
 
 -- name: DeletePlan :execrows
 DELETE FROM plans WHERE id = $1;

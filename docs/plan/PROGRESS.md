@@ -1324,3 +1324,90 @@ PostgreSQL 侧对照本地没跑（本机 Docker 未启动），交给 CI 的 PG
 `TestMailJobsWriteBackUnreadCount`、`TestUnreadSortParity`;前端 20 个文件 90 条用例通过。
 TLS 用一次性探测程序对本机 Go 1.27 实测:开关关闭握手失败、打开后协商出 `0x9c`。
 PostgreSQL 对照本地仍未跑(本机未起 Docker),交给 CI。
+
+### 邮件列表开箱:会话复用与前端就地渲染(2026-11-21,用户要求)
+
+- 打开邮箱慢的主因不是 SQL 或 React,而是**每个邮件请求都重走 TCP + TLS + LOGIN**。
+  新增 `imapx.SessionPool`:键为 `PoolScope(tenant|account) + 通道 + 主机 + 代理`,
+  账号之间绝不共用会话;空闲 5 分钟回收,全局上限 64 条。会话失效(EOF/连接关闭)时
+  关闭并自动重连一次,业务错误(邮件不存在、文件夹不可用)不重试。池由 `MessageService`
+  持有并注入各通道,不是包级变量——`TestSessionPoolIsolatesScopes` 守着账号隔离,
+  `TestSessionPoolReconnectsAfterConnectionDropped` 守着失效重连。
+- 文件夹解析结果按账号缓存 1 小时:候选表里的垃圾箱别名往往要试好几个才中,
+  每试一个都是一次完整往返;缓存命中后一次 SELECT 直达。
+- `folder=all` 改为两条会话并行拉收件箱与垃圾箱。归并顺序固定为收件箱在前,
+  时间相同的两封信排序后再归并的顺序与串行版本一致。
+- 前端:列表按「账号 + 文件夹」做 5 分钟模块级缓存,切回看过的邮箱或点刷新时
+  先渲染旧数据、后台再更新;刷新不再清空列表。没有缓存时用骨架屏代替一行文字。
+  邮件返回后只重取账号列表(`reloadAccounts`),不再顺带拉分组与统计。
+- 打开未读邮件即置为已读:**等详情数据真正返回**、且服务端返回的 `is_read` 仍为
+  false 时,前端调用批量已读接口(带 `was_unread`),复用同一条本地更新与账号未读数
+  扣减路径。详情取失败不会误标;列表里已经显示为已读时不会再调一次。协议层仍用
+  `BODY.PEEK`:详情本身不改服务端状态,置已读是显式请求,脚本拉详情不会顺带改状态。
+  `TestDetailDoesNotMarkAsRead` 继续有效——它守的是「取详情本身不置已读」。
+- 修显示层的一个时序问题:收信检查任务运行期间,账号徽标优先用 SSE 快照;
+  本地标已读后虽然库里的 `unread_count` 已经减了,快照仍是检查时的旧值,
+  于是表现为「邮件已读、徽标不降」。现在列表里标已读/删除成功后会调用
+  `jobStore.clearUnread(accountID)` 丢掉该账号的快照,回落到刚重取的库值。
+- Kumo 分段 Tabs 在父级 flex 里被压缩时会出现内部横向溢出,并显示一个
+  「滚动到右侧」的箭头压在最后一个标签上——表现为「已读 N」的数字错位。
+  `MessageFilterPills` 给 Tabs 加 `shrink-0`,由筛选栏自己的 `overflow-x-auto`
+  负责滚动,箭头不再出现。
+- 计时日志(均为 Info 级,线上可直接看):`IMAP 建连完成`(dial/identify/auth/total)、
+  `IMAP 列表耗时`(reused/select/fetch/elapsed)、`邮件列表请求完成`(cached/elapsed)。
+
+测试:`TestSessionPoolReusesConnection`、`TestSessionPoolIsolatesScopes`、
+`TestSessionPoolRequiresScope`、`TestSessionPoolReconnectsAfterConnectionDropped`、
+`TestListAllFetchesFoldersInParallel`(已做变异验证:改回串行即红);
+`go test ./pkg/mailer/imapx ./pkg/service ./api` 通过,前端 tsc / eslint / vitest
+(21 文件 98 条)通过。真实邮箱的端到端开箱耗时未在本机验证,以日志里的
+`elapsed_ms` 为准。
+
+### 正文翻译(2026-11-21,用户要求)
+
+- 部署侧通过 `LLM_BASEURL` / `LLM_APIKEY` / `LLM_MODEL` 启用 OpenAI 兼容的大模型;
+  未配置时用 `TRANSLATE_FALLBACK_PROVIDER=libretranslate|deepl` 的兜底引擎;
+  两者都没有时详情页不显示翻译按钮(`/auth/session` 的 `translation_enabled`)。
+  只配一半一律启动失败,与 Waffo 配置同一口径。
+- 接口 `POST /mail/accounts/:accountID/messages/:messageID/translate/stream`(2026-11-22 起):正文由服务端
+  重新取,不接受前端上传(否则会变成租户可用的通用翻译代理);先解析账号归属
+  再判功能开关,别人租户的 ID 稳定得到 404。
+- 配额走方案 B:`plans.daily_translate`(迁移 000025,默认 200,-1 不限),
+  打翻译服务之前预扣 `translate` 指标;管理员页「套餐」在「每日拉信」后新增
+  「每日翻译」,价格页、用量页、分配套餐摘要同步展示。
+- API Key 一律 403(`middleware.DenyAPIKey`);端点不登记进 `APIEndpoints`,
+  `/llms.txt` 不给出一个必然被拒的接口。
+- 长正文按段落切块(4000 字符/块,最多 3 块并发);超过 3.2 万字符只翻前段并
+  返回 `truncated`。任一块失败整次失败,不返回半中文半英文。首选失败后熔断 60 秒。
+- HTML 正文用 `HTMLToText` 提取纯文本;`<br>` 必须按行内换行处理,不能当块级元素,
+  否则同段内的换行会变成空行。script/style/head 不参与。
+- 译文在内存缓存 10 分钟;缓存命中不重复打引擎,但仍计一次配额(先扣后调)。
+
+**坑**:迁移执行器按 `;` 切语句,注释里出现 ASCII 分号会被当成语句分隔符,
+续行变成非法 SQL(报 `near "管理员可在套餐页调整": syntax error`)。迁移注释
+不要写 ASCII 分号。
+
+测试:`TestValidateTranslation`、translate 包的兜底/熔断/缓存/分块/截断、
+`TestHTMLToTextPreservesParagraphs`、`TestTranslationUsesFallbackEngine`、
+`TestTranslationChecksTenantBeforeFeatureFlag`、`TestTranslateEndpointDisabled`、
+`TestAPIKeyCannotTranslate`;前端 tsc / eslint / vitest(22 文件 100 条)通过。
+
+### 流式翻译与 DeepL 多 key(2026-11-21,2026-11-22 改为流式)
+
+- 真实链路实测:免费中转 499 字要 25–30 秒,而传统引擎约 1 秒。「失败才转兜底」不够——
+  请求是成功的,用户只会以为翻译坏了。
+- 2026-11-22 起废弃「3 秒对冲」:对冲赢了会取消大模型,与「大模型结果替换传统译文」
+  的产品目标相反。改为 SSE(`POST .../translate/stream`):两个引擎同时发起,
+  传统引擎先发 `final:false` 先显示,大模型结果到达后再发 `final:true` 替换;
+  大模型失败时保留传统译文。客户端切邮件/关页面会取消两个引擎的调用。
+  一次请求只取一遍正文、只扣一次 `daily_translate`。
+- 缓存按质量保留:传统引擎的结果可以缓存,但命中后仍会尝试升级;大模型结果直接
+  命中结束,且不会被传统引擎结果覆盖。
+- `TRANSLATE_FALLBACK_APIKEY` 支持英文逗号分隔的多个 key,按请求轮询摊平额度;
+  遇到 401/403/429/456 会在同一次调用里换下一个 key。多 key 仅 DeepL 支持,
+  LibreTranslate 配多个会启动失败。
+- 翻译事件记录 `engine` / `final` / `chars` / `detail_ms`,不含正文:既能判断慢在
+  取信还是慢在模型,也能确认替换是否真的发生。
+- 新增测试:`TestStreamFastFirstThenQualityUpgrade`、`TestStreamKeepsFastResultWhenQualityFails`、
+  `TestStreamQualityFirstOnly`、`TestStreamBothFail`、`TestStreamCachedFastStillUpgrades`、
+  `TestDeepLRotatesKeys`。

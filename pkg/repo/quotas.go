@@ -71,6 +71,7 @@ func (s *Store) GetEffectiveQuota(ctx context.Context, tenantID string) (*model.
 			PlanID: v.PlanID, PlanSource: v.PlanSource, PlanCode: v.PlanCode, PlanName: v.PlanName,
 			MaxAccounts: int(v.MaxAccounts), MaxGroups: int(v.MaxGroups),
 			DailyMailFetch: int(v.DailyMailFetch),
+			DailyTranslate: int(v.DailyTranslate),
 		}, nil
 	}
 	v, e := s.postgres.GetEffectiveQuota(ctx, tenantID)
@@ -81,6 +82,7 @@ func (s *Store) GetEffectiveQuota(ctx context.Context, tenantID string) (*model.
 		PlanID: v.PlanID, PlanSource: v.PlanSource, PlanCode: v.PlanCode, PlanName: v.PlanName,
 		MaxAccounts: int(v.MaxAccounts), MaxGroups: int(v.MaxGroups),
 		DailyMailFetch: int(v.DailyMailFetch),
+			DailyTranslate: int(v.DailyTranslate),
 	}, nil
 }
 
@@ -118,6 +120,7 @@ func mapSQLitePlan(p sqlitedb.Plan) *model.Plan {
 		ID: p.ID, Code: p.Code, Name: p.Name, IsDefault: p.IsDefault != 0,
 		MaxAccounts: int(p.MaxAccounts), MaxGroups: int(p.MaxGroups),
 		DailyMailFetch: int(p.DailyMailFetch),
+			DailyTranslate: int(p.DailyTranslate),
 		CreatedAt:      p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 }
@@ -127,6 +130,7 @@ func mapPostgresPlan(p postgresdb.Plan) *model.Plan {
 		ID: p.ID, Code: p.Code, Name: p.Name, IsDefault: p.IsDefault != 0,
 		MaxAccounts: int(p.MaxAccounts), MaxGroups: int(p.MaxGroups),
 		DailyMailFetch: int(p.DailyMailFetch),
+			DailyTranslate: int(p.DailyTranslate),
 		CreatedAt:      p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 }
@@ -160,13 +164,13 @@ func (s *Store) CreatePlan(ctx context.Context, p model.Plan) error {
 		err = s.sqlite.CreatePlan(ctx, sqlitedb.CreatePlanParams{
 			ID: p.ID, Code: p.Code, Name: p.Name, IsDefault: boolToInt64(p.IsDefault),
 			MaxAccounts: int64(p.MaxAccounts), MaxGroups: int64(p.MaxGroups),
-			DailyMailFetch: int64(p.DailyMailFetch),
+			DailyMailFetch: int64(p.DailyMailFetch), DailyTranslate: int64(p.DailyTranslate),
 		})
 	} else {
 		err = s.postgres.CreatePlan(ctx, postgresdb.CreatePlanParams{
 			ID: p.ID, Code: p.Code, Name: p.Name, IsDefault: boolToInt32(p.IsDefault),
 			MaxAccounts: int32(p.MaxAccounts), MaxGroups: int32(p.MaxGroups),
-			DailyMailFetch: int32(p.DailyMailFetch),
+			DailyMailFetch: int32(p.DailyMailFetch), DailyTranslate: int32(p.DailyTranslate),
 		})
 	}
 	return normalize(err)
@@ -178,13 +182,13 @@ func (s *Store) UpdatePlan(ctx context.Context, p model.Plan) error {
 		return rowsAffected(s.sqlite.UpdatePlan(ctx, sqlitedb.UpdatePlanParams{
 			Name: p.Name, IsDefault: boolToInt64(p.IsDefault),
 			MaxAccounts: int64(p.MaxAccounts), MaxGroups: int64(p.MaxGroups),
-			DailyMailFetch: int64(p.DailyMailFetch), ID: p.ID,
+			DailyMailFetch: int64(p.DailyMailFetch), DailyTranslate: int64(p.DailyTranslate), ID: p.ID,
 		}))
 	}
 	return rowsAffected(s.postgres.UpdatePlan(ctx, postgresdb.UpdatePlanParams{
 		Name: p.Name, IsDefault: boolToInt32(p.IsDefault),
 		MaxAccounts: int32(p.MaxAccounts), MaxGroups: int32(p.MaxGroups),
-		DailyMailFetch: int32(p.DailyMailFetch), ID: p.ID,
+		DailyMailFetch: int32(p.DailyMailFetch), DailyTranslate: int32(p.DailyTranslate), ID: p.ID,
 	}))
 }
 

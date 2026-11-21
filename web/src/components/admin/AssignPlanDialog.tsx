@@ -125,7 +125,7 @@ export function AssignPlanDialog({ target, onClose, onAssigned }: AssignPlanDial
                 </span>
                 <span className="mt-1 block text-xs text-kumo-subtle">
                   邮箱 {quota(plan.max_accounts)} · 分组 {quota(plan.max_groups)} · 每日拉信{" "}
-                  {quota(plan.daily_mail_fetch)}
+                  {quota(plan.daily_mail_fetch)} · 每日翻译 {quota(plan.daily_translate)}
                 </span>
               </button>
             );

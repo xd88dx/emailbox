@@ -2,6 +2,9 @@ package imapx
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"strings"
@@ -28,6 +31,11 @@ type Config struct {
 	DialFunc func(ctx context.Context, host string, port int, proxyURL string) (net.Conn, error)
 	// TLSLegacy 打开静态 RSA 套件,用于只支持旧式 TLS 的服务商(如新浪 993)。
 	TLSLegacy bool
+	// Pool 复用已登录的会话。nil 表示每次请求重新建连(测试与 mailprobe 走这条)。
+	Pool *SessionPool
+	// PoolScope 让池按账号隔离会话,形如 tenantID|accountID。
+	// 为空时即使配了 Pool 也不复用:没有作用域就可能让不同账号共用一条连接。
+	PoolScope string
 }
 
 // Client 是 IMAP 通道的实现。
@@ -58,6 +66,8 @@ type session struct {
 	// uidCapable 表示该连接上可以用 UID 命令。几乎所有服务器都支持，
 	// 但这个标记要如实带到 Message.IDMode 上——混用 UID 与序列号会取到错误的邮件。
 	uidCapable bool
+	// reused 表示这条会话来自池,本次没有重新握手。只用于计时日志。
+	reused bool
 }
 
 func (s *session) close() {
@@ -95,16 +105,32 @@ func runOnProxy[T any](
 	fn func(context.Context, *session) (T, error),
 ) (T, error) {
 	var zero T
+	key := ""
+	if c.cfg.Pool != nil && c.cfg.PoolScope != "" {
+		key = c.poolKey(cred, proxyURL)
+		// 池里还有会话就直接用;连接已死时 runPooled 返回 usable=false,
+		// 这里新建一条再执行一次——只重试一次,避免坏账号把请求拖成多倍耗时。
+		if out, usable, err := runPooled(ctx, c, key, fn); usable {
+			return out, err
+		}
+	}
 	s, err := c.connect(ctx, cred, proxyURL)
 	if err != nil {
 		return zero, err
 	}
-	defer s.close()
-	return fn(ctx, s)
+	out, err := fn(ctx, s)
+	if key != "" && err == nil {
+		c.cfg.Pool.release(key, s)
+		return out, nil
+	}
+	// 出过错或没启用池:这条连接不再复用。
+	s.close()
+	return out, err
 }
 
 // connect 建立连接、发 ID、鉴权。
 func (c *Client) connect(ctx context.Context, cred mailer.Credential, proxyURL string) (*session, error) {
+	start := time.Now()
 	host, port := imapServer(c.cfg.Channel, cred)
 	if host == "" {
 		return nil, newError(c.cfg.Channel, mailer.ErrKindProviderError,
@@ -115,17 +141,98 @@ func (c *Client) connect(ctx context.Context, cred mailer.Credential, proxyURL s
 	if err != nil {
 		return nil, err
 	}
+	dialMS := time.Since(start).Milliseconds()
 
 	client := imapclient.New(conn, &imapclient.Options{WordDecoder: wordDecoder})
 	s := &session{imap: client, proxy: proxyURL}
 
+	identifyStart := time.Now()
 	c.identify(client)
+	identifyMS := time.Since(identifyStart).Milliseconds()
+	authStart := time.Now()
 	if err := c.authenticate(ctx, client, cred, proxyURL); err != nil {
 		s.close()
 		return nil, err
 	}
 	s.uidCapable = true
+	// 建连耗时是「打开邮箱慢」最主要的固定成本,按阶段分开记:
+	// dial 含 TCP + TLS + 代理握手,identify 只对要求 IMAP ID 的服务器存在,
+	// auth 是 LOGIN/XOAUTH2。三项仍占大头时该做会话复用,而不是调大超时。
+	slog.Info("IMAP 建连完成",
+		"channel", c.cfg.Channel,
+		"email", mailer.MaskEmail(cred.Email),
+		"dial_ms", dialMS,
+		"identify_ms", identifyMS,
+		"auth_ms", time.Since(authStart).Milliseconds(),
+		"total_ms", time.Since(start).Milliseconds(),
+	)
 	return s, nil
+}
+
+// runPooled 尝试复用池里的会话。
+//
+// usable=false 有两种含义:池里没有空闲会话,或者取到的会话已经失效。
+// 两种都由调用方新建一条连接,因此这里不需要区分。
+func runPooled[T any](
+	ctx context.Context, c *Client, key string,
+	fn func(context.Context, *session) (T, error),
+) (T, bool, error) {
+	var zero T
+	s := c.cfg.Pool.acquire(key)
+	if s == nil {
+		return zero, false, nil
+	}
+	out, err := fn(ctx, s)
+	if err == nil {
+		c.cfg.Pool.release(key, s)
+		return out, true, nil
+	}
+	// 出过错的会话状态不明,不能再放回池里。
+	c.cfg.Pool.discard(s)
+	if !sessionDead(err) {
+		return zero, true, err
+	}
+	slog.Debug("IMAP 会话已失效,重新建连", "channel", c.cfg.Channel, "error", err)
+	return zero, false, nil
+}
+
+// poolKey 按「账号作用域 + 通道 + 主机 + 出口代理」隔离会话。
+//
+// 代理必须进键:同一个账号换到另一条代理等于换了一个出口身份,
+// 复用旧连接会让 {mail} 模板失去意义。
+func (c *Client) poolKey(cred mailer.Credential, proxyURL string) string {
+	host, port := imapServer(c.cfg.Channel, cred)
+	return fmt.Sprintf("%s\x00%s\x00%s:%d\x00%s", c.cfg.PoolScope, c.cfg.Channel, host, port, proxyURL)
+}
+
+// sessionDead 判断错误是否意味着这条连接已经不能再用。
+//
+// 只认网络层的断裂:业务错误(邮件不存在、文件夹不可用、鉴权失败)重连也是同样结果,
+// 重试只会多打一次上游。调用方取消同样不重试。
+func sessionDead(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"connection closed", "client closed", "broken pipe",
+		"use of closed network connection", "unexpected eof",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) dial(ctx context.Context, host string, port int, proxyURL string) (net.Conn, error) {

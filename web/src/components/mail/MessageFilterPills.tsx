@@ -27,6 +27,10 @@ interface MessageFilterPillsProps {
 export function MessageFilterPills({ value, onChange, counts }: MessageFilterPillsProps) {
   return (
     <Tabs
+      // 不参与横向收缩:否则 Kumo 会在 Tabs 内部出现滚动溢出,
+      // 并把「滚动到右侧」的箭头压在最后一个「已读 N」上,看起来像数字错位。
+      // 让它在父级的 overflow-x-auto 里保持自然宽度,由整行滚动。
+      className="shrink-0"
       variant="segmented"
       size="sm"
       value={value}

@@ -1,10 +1,11 @@
 import { Button } from "@cloudflare/kumo/components/button";
-import { ArrowsIn, ArrowsOut, Copy, X } from "@phosphor-icons/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowsIn, ArrowsOut, Copy, Translate, X } from "@phosphor-icons/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   mailApi,
   type Message,
   type MessageDetail as Detail,
+  type MessageTranslation,
   type TenantRef,
   mailScopeKey,
 } from "@/api/mail";
@@ -13,6 +14,7 @@ import { MessageBody } from "./MessageBody";
 import { VerificationCodeChip } from "./VerificationCodeChip";
 import { findVerificationCode } from "./verificationCode";
 import { refKey, toRef } from "./messageRef";
+import { useAuthStore } from "@/store/authStore";
 
 interface MessageDetailProps {
   tenantID: TenantRef;
@@ -21,6 +23,10 @@ interface MessageDetailProps {
   // 不至于整栏空白——详情要走一次远端调用，慢的时候是十几秒。
   message: Message;
   onClose: () => void;
+  // 详情真正拿到数据、且服务端说这封仍未读时调用一次。
+  // 列表层据此调用批量已读接口;放在这里而不是点击时,是为了
+  // 详情取失败时不会先把邮件标成已读。
+  onLoaded?: (message: Message) => void;
 }
 
 interface DetailState {
@@ -62,7 +68,54 @@ function rememberDetail(key: string, detail: Detail) {
   detailCache.set(key, { detail, expiresAt: Date.now() + DETAIL_TTL_MS });
 }
 
-export function MessageDetail({ tenantID, accountID, message, onClose }: MessageDetailProps) {
+// 译文缓存十分钟:在两封信之间来回切换不重复调用付费服务。
+// 只存内存、不落盘——译文同样是租户的私有数据。
+const TRANSLATION_TTL_MS = 10 * 60 * 1000;
+const TRANSLATION_CACHE_MAX = 60;
+const translationCache = new Map<string, { result: MessageTranslation; expiresAt: number }>();
+
+interface TranslationState {
+  key: string;
+  result: MessageTranslation | null;
+  loading: boolean;
+  // 快引擎结果已经显示,大模型还在翻译中。
+  upgrading: boolean;
+  error: string;
+}
+
+const emptyTranslation = (key: string): TranslationState => ({
+  key,
+  result: null,
+  loading: false,
+  upgrading: false,
+  error: "",
+});
+
+function cachedTranslation(key: string): MessageTranslation | null {
+  const entry = translationCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    translationCache.delete(key);
+    return null;
+  }
+  return entry.result;
+}
+
+function rememberTranslation(key: string, result: MessageTranslation) {
+  if (translationCache.size >= TRANSLATION_CACHE_MAX) {
+    const oldest = translationCache.keys().next().value;
+    if (oldest) translationCache.delete(oldest);
+  }
+  translationCache.set(key, { result, expiresAt: Date.now() + TRANSLATION_TTL_MS });
+}
+
+export function MessageDetail({
+  tenantID,
+  accountID,
+  message,
+  onClose,
+  onLoaded,
+}: MessageDetailProps) {
   const [fullscreen, setFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const key = `${mailScopeKey(tenantID)}|${accountID}|${refKey(message)}`;
@@ -79,6 +132,18 @@ export function MessageDetail({ tenantID, accountID, message, onClose }: Message
     const cached = cachedDetail(key);
     view = cached ? { key, detail: cached, loading: false, error: "" } : loadingState(key);
     setState(view);
+  }
+
+  const translationEnabled = useAuthStore((s) => s.translationEnabled);
+  const [translation, setTranslation] = useState(() => {
+    const cached = cachedTranslation(key);
+    return cached ? { key, result: cached, loading: false, upgrading: false, error: "" } : emptyTranslation(key);
+  });
+  let tview = translation;
+  if (translation.key !== key) {
+    const cached = cachedTranslation(key);
+    tview = cached ? { key, result: cached, loading: false, upgrading: false, error: "" } : emptyTranslation(key);
+    setTranslation(tview);
   }
 
   useEffect(() => {
@@ -105,6 +170,17 @@ export function MessageDetail({ tenantID, accountID, message, onClose }: Message
       ignore = true;
     };
   }, [key, tenantID, accountID, messageID, idMode, folder, view.detail]);
+
+  // 详情数据到手后才轮到「置已读」。判断用服务端返回的 is_read,
+  // 而不是列表摘要:别的客户端可能已经读过,按摘要判断会多扣一次未读数。
+  // 同一封只通知一次——列表更新后本组件不会因此再次触发。
+  const notifiedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!view.detail || view.detail.is_read) return;
+    if (notifiedRef.current === key) return;
+    notifiedRef.current = key;
+    onLoaded?.(message);
+  }, [view.detail, key, message, onLoaded]);
 
   // 全屏时 Esc 退出。这是全屏阅读唯一的出口，不给的话用户只能去点右上角。
   useEffect(() => {
@@ -146,6 +222,72 @@ export function MessageDetail({ tenantID, accountID, message, onClose }: Message
       // 复制失败不该弹错误对话框打断阅读，按钮维持原样即可。
     }
   }, [detail]);
+
+  // 翻译流的中断句柄。切邮件或关详情时必须取消:否则上一封的大模型请求
+  // 会继续占着连接,结果回来还可能写到新邮件上。
+  const translateAbort = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      translateAbort.current?.abort();
+    },
+    [key],
+  );
+
+  const translate = useCallback(async () => {
+    translateAbort.current?.abort();
+    const controller = new AbortController();
+    translateAbort.current = controller;
+    setTranslation((prev) =>
+      prev.key === key ? { ...prev, loading: true, upgrading: false, error: "" } : prev,
+    );
+    try {
+      await mailApi.translateMessageStream(
+        tenantID,
+        accountID,
+        messageID,
+        { folder, id_mode: idMode },
+        {
+          onResult: (result) => {
+            // 只缓存最终稿:快引擎的占位译文下次应当再尝试升级。
+            if (result.final) rememberTranslation(key, result);
+            setTranslation((prev) =>
+              prev.key === key
+                ? { key, result, loading: false, upgrading: !result.final, error: "" }
+                : prev,
+            );
+          },
+          onError: (message) => {
+            setTranslation((prev) =>
+              prev.key === key
+                ? {
+                    ...prev,
+                    loading: false,
+                    upgrading: false,
+                    // 已经有快引擎译文时保留它,不让错误顶掉可读的结果。
+                    error: prev.result ? "" : message,
+                  }
+                : prev,
+            );
+          },
+        },
+        controller.signal,
+      );
+      // 流正常结束:如果最后停在快引擎结果上(大模型失败),就保持那一版。
+      setTranslation((prev) =>
+        prev.key === key ? { ...prev, loading: false, upgrading: false } : prev,
+      );
+    } catch (e) {
+      if (controller.signal.aborted) return;
+      const message = e instanceof Error ? e.message : "翻译失败";
+      setTranslation((prev) =>
+        prev.key === key
+          ? { ...prev, loading: false, upgrading: false, error: prev.result ? "" : message }
+          : prev,
+      );
+    } finally {
+      if (translateAbort.current === controller) translateAbort.current = null;
+    }
+  }, [key, tenantID, accountID, messageID, idMode, folder]);
 
   return (
     <section
@@ -200,12 +342,42 @@ export function MessageDetail({ tenantID, accountID, message, onClose }: Message
           <Button size="sm" variant="secondary" icon={Copy} onClick={() => void copyBody()}>
             {copied ? "已复制" : "复制正文"}
           </Button>
+          {translationEnabled && (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={Translate}
+              disabled={tview.loading || tview.upgrading}
+              title="正文会发送到部署方配置的翻译服务"
+              onClick={() => void translate()}
+            >
+              {tview.loading || tview.upgrading
+                ? "翻译中..."
+                : tview.result
+                  ? "重新翻译"
+                  : "翻译成中文"}
+            </Button>
+          )}
           {code && <VerificationCodeChip code={code} />}
         </div>
       )}
 
       {view.loading && <p className="p-6 text-sm text-kumo-subtle">正在加载邮件正文…</p>}
       {view.error && <p className="p-6 text-sm text-kumo-danger">{view.error}</p>}
+      {tview.error && <p className="px-4 pt-2 text-sm text-kumo-danger">翻译失败:{tview.error}</p>}
+
+      {tview.result && (
+        <div className="max-h-[40%] shrink-0 overflow-y-auto border-b border-kumo-line px-4 py-3">
+          <p className="mb-2 text-xs text-kumo-subtle">
+            中文译文 · {engineLabel(tview.result.engine)}
+            {tview.upgrading ? " · 大模型翻译中..." : ""}
+            {tview.result.truncated ? " · 正文过长,仅翻译了前段" : ""}
+          </p>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-kumo-default">
+            {tview.result.text}
+          </p>
+        </div>
+      )}
 
       {detail && (
         <>
@@ -215,6 +387,19 @@ export function MessageDetail({ tenantID, accountID, message, onClose }: Message
       )}
     </section>
   );
+}
+
+function engineLabel(engine: string): string {
+  switch (engine) {
+    case "llm":
+      return "大模型";
+    case "deepl":
+      return "DeepL";
+    case "libretranslate":
+      return "LibreTranslate";
+    default:
+      return engine;
+  }
 }
 
 // MetaRow 在字段为空时整行不渲染：大多数邮件没有抄送，

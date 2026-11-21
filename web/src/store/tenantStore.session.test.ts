@@ -45,6 +45,7 @@ describe("会话切换时的租户数据隔离", () => {
       tenants: [tenant("beta")],
       active_tenant_id: "beta",
       desktop: false,
+      translation_enabled: false,
     });
 
     const state = useTenantStore.getState();

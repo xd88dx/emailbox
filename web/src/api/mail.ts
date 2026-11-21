@@ -148,6 +148,7 @@ export interface Limits {
   max_accounts: number;
   max_groups: number;
   daily_mail_fetch: number;
+  daily_translate: number;
 }
 
 // 邮件相关类型。与 pkg/mailer/mailer.go 手工同步。
@@ -183,6 +184,17 @@ export interface MessageDetail extends Message {
   body: string;
   body_type: "text" | "html";
   attachments: AttachmentMeta[];
+}
+
+export interface MessageTranslation {
+  text: string;
+  // 实际生效的引擎:llm / libretranslate / deepl。
+  engine: string;
+  // 正文超过上限时只翻了前段。
+  truncated: boolean;
+  cached: boolean;
+  // false 表示这是快引擎的结果,大模型的结果可能随后到达并替换它。
+  final?: boolean;
 }
 
 export interface MessageListResponse {
@@ -249,6 +261,91 @@ const MESSAGE_TIMEOUT = 120_000;
 
 // 导出要逐个解密上万条凭据，10 秒的默认超时不够。
 const EXPORT_TIMEOUT = 60_000;
+
+export interface TranslateHandlers {
+  onResult: (result: MessageTranslation) => void;
+  onError: (message: string) => void;
+}
+
+// 翻译走 SSE:快引擎结果先到先显示,大模型结果到了再替换。
+// 用 fetch 而不是 EventSource——端点需要 POST、要带 Cookie,还要能随时中断。
+async function translateMessageStream(
+  tenantID: TenantRef,
+  accountID: string,
+  messageID: string,
+  params: { folder: MailFolder; id_mode: IDMode },
+  handlers: TranslateHandlers,
+  signal: AbortSignal,
+): Promise<void> {
+  const query = new URLSearchParams(params).toString();
+  const url =
+    `${apiBaseURL}${messageBase(tenantID, accountID)}/${encodeURIComponent(messageID)}` +
+    `/translate/stream?${query}`;
+  const resp = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers: { Accept: "text/event-stream" },
+    signal,
+  });
+  if (!resp.ok) {
+    handlers.onError(await responseMessage(resp));
+    return;
+  }
+  const reader = resp.body?.getReader();
+  if (!reader) {
+    handlers.onError("当前浏览器不支持流式响应");
+    return;
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let index: number;
+    while ((index = buffer.indexOf("\n\n")) >= 0) {
+      const frame = buffer.slice(0, index);
+      buffer = buffer.slice(index + 2);
+      dispatchFrame(frame, handlers);
+    }
+  }
+}
+
+function dispatchFrame(frame: string, handlers: TranslateHandlers) {
+  let event = "message";
+  const data: string[] = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith(":") || line.startsWith("id:")) continue;
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+  }
+  if (data.length === 0) return;
+  const raw = data.join("\n");
+  if (event === "error") {
+    try {
+      handlers.onError((JSON.parse(raw) as { message?: string }).message ?? "翻译失败");
+    } catch {
+      handlers.onError("翻译失败");
+    }
+    return;
+  }
+  if (event !== "result") return;
+  try {
+    handlers.onResult(JSON.parse(raw) as MessageTranslation);
+  } catch {
+    handlers.onError("翻译结果无法解析");
+  }
+}
+
+async function responseMessage(resp: Response): Promise<string> {
+  try {
+    const body = (await resp.json()) as { message?: string };
+    if (body?.message) return body.message;
+  } catch {
+    // 非 JSON 响应(代理错误页等)退回到状态码。
+  }
+  return `翻译失败 (${resp.status})`;
+}
 
 export const mailApi = {
   groups: async (tenantID: TenantRef) =>
@@ -375,6 +472,7 @@ export const mailApi = {
     ).data,
   // 附件走浏览器直接下载而不是 XHR：后端已经带了 Content-Disposition，
   // 交给浏览器处理能省掉一次内存里的完整拷贝，大附件上差别明显。
+  translateMessageStream,
   attachmentURL: (
     tenantID: TenantRef,
     accountID: string,

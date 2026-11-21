@@ -14,13 +14,45 @@ import { EmptyState } from "./EmptyState";
 import { FolderTabs } from "./FolderTabs";
 import { MessageBatchActions } from "./MessageBatchActions";
 import { MessageFilterPills, type ReadFilter } from "./MessageFilterPills";
-import { refKey } from "./messageRef";
+import { refKey, toRef } from "./messageRef";
 import { MESSAGE_ROW_HEIGHT, MessageRow } from "./MessageRow";
 import { VirtualList } from "./VirtualList";
 
 // 一页 25 条。后端上限是 50（service.maxTop），但首屏越小出得越快，
 // 而每一次拉取都要打上游，宁可让用户按需再要一页。
 const PAGE_SIZE = 25;
+
+// 列表缓存只解决「切回来先看到内容」:命中就先渲染上一份结果,同时照常请求。
+// 服务端自己还有 60 秒缓存,所以这里的旧数据通常只落后一个请求,
+// 而不是让用户对着「正在拉取」白屏。账号切换会卸载本组件,缓存必须放在模块级。
+const LIST_CACHE_TTL = 5 * 60 * 1000;
+const LIST_CACHE_MAX = 64;
+interface CachedList {
+  items: Message[];
+  channel: string;
+  reachedEnd: boolean;
+  at: number;
+}
+const listCache = new Map<string, CachedList>();
+
+function readListCache(key: string): CachedList | null {
+  const hit = listCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > LIST_CACHE_TTL) {
+    listCache.delete(key);
+    return null;
+  }
+  return hit;
+}
+
+function writeListCache(key: string, value: CachedList) {
+  if (!listCache.has(key) && listCache.size >= LIST_CACHE_MAX) {
+    // 只缓存首页,丢最早写入的一条即可;不值得为「丢哪个」引入 LRU。
+    const oldest = listCache.keys().next().value;
+    if (oldest !== undefined) listCache.delete(oldest);
+  }
+  listCache.set(key, value);
+}
 
 // Page 是「某一批数据」的全部状态，key 标明它属于哪个账号/文件夹/第几次刷新。
 // 收拢成一个对象是为了能在渲染期一次性重置——切账号或切文件夹时若用 effect 逐个
@@ -46,7 +78,48 @@ const emptyPage = (key: string): Page => ({
   selected: new Set(),
 });
 
+// pageFromCache 用缓存构造一个「有内容但仍在加载」的页。
+// 直接用 emptyPage 会让切回看过的邮箱时又白屏一次,缓存的意义正是不白屏。
+const pageFromCache = (key: string, listKey: string): Page | null => {
+  const cached = readListCache(listKey);
+  if (!cached) return null;
+  return {
+    key,
+    items: cached.items,
+    channel: cached.channel,
+    reachedEnd: cached.reachedEnd,
+    loading: true,
+    error: "",
+    selected: new Set(),
+  };
+};
+
 const message = (e: unknown) => (e instanceof Error ? e.message : "加载失败");
+
+const SKELETON_ROWS = [0, 1, 2, 3, 4, 5];
+
+// 邮件类请求走上游,经常要一秒以上。有形状的占位比一句「正在拉取」更容易
+// 让人判断页面还在动;行高与实际列表接近,数据到达时不会整块跳动。
+function MessageListSkeleton() {
+  return (
+    <div
+      className="flex-1 overflow-hidden px-3 py-2"
+      role="status"
+      aria-label="正在从服务器拉取邮件"
+    >
+      {SKELETON_ROWS.map((i) => (
+        <div key={i} className="border-b border-kumo-line py-3">
+          <div className="flex items-center gap-2">
+            <div className="h-3 w-24 animate-pulse rounded bg-kumo-tint" />
+            <div className="h-3 w-12 animate-pulse rounded bg-kumo-tint" />
+          </div>
+          <div className="mt-2 h-3 w-3/4 animate-pulse rounded bg-kumo-tint" />
+        </div>
+      ))}
+      <p className="pt-3 text-sm text-kumo-subtle">正在从服务器拉取邮件...</p>
+    </div>
+  );
+}
 
 interface MessageListProps {
   tenantID: TenantRef;
@@ -60,6 +133,8 @@ interface MessageListProps {
   onClose: () => void;
   // 批量标已读后通知外层刷新账号列表里的未读标识。
   onAccountsChanged?: () => void;
+  // 详情真正加载完成后由外层转交的置已读信号。seq 区分同一封邮件的多次打开。
+  readSignal?: { accountID: string; message: Message; seq: number } | null;
 }
 
 export function MessageList({
@@ -70,6 +145,7 @@ export function MessageList({
   onRemoved,
   onClose,
   onAccountsChanged,
+  readSignal,
 }: MessageListProps) {
   const [folder, setFolder] = useState<MailFolder>("inbox");
   const [readFilter, setReadFilter] = useState<ReadFilter>("all");
@@ -78,8 +154,10 @@ export function MessageList({
   // 插进模板串会变成 "[object Object]"，于是所有租户共用同一个 key，
   // 管理员切到另一个租户时列表不重置——看到的还是上一个人的邮件。
   const key = `${mailScopeKey(tenantID)}|${accountID}|${folder}|${reloadToken}`;
+  // 缓存键不含 reloadToken:手动刷新要沿用同一份旧数据,期间列表不清空。
+  const listKey = `${mailScopeKey(tenantID)}|${accountID}|${folder}`;
 
-  const [page, setPage] = useState(() => emptyPage(key));
+  const [page, setPage] = useState(() => pageFromCache(key, listKey) ?? emptyPage(key));
 
   // 自动打开/切换邮箱走一分钟缓存;右上角手动刷新绕过缓存,但 5 秒内只能点一次。
   // 每一次强制刷新都是真实的上游调用并扣一次取件额度。
@@ -106,7 +184,8 @@ export function MessageList({
   // 这一版的输出会被 React 丢弃并立刻用新 state 重渲染，所以下面统一用 view 而不是 page。
   let view = page;
   if (page.key !== key) {
-    view = emptyPage(key);
+    // 仍然标记 loading:这是旧数据,后台请求还在跑,刷新按钮也不该被点。
+    view = pageFromCache(key, listKey) ?? emptyPage(key);
     setPage(view);
   }
 
@@ -152,6 +231,18 @@ export function MessageList({
       ignore = true;
     };
   }, [key, tenantID, accountID, folder, patch, onAccountsChanged]);
+
+  // 每次拿到稳定结果就回写缓存。放在 effect 而不是 patch 内部:
+  // 后者是在 setState 更新函数里做副作用,StrictMode 下会被调用两次。
+  useEffect(() => {
+    if (page.key !== key || page.loading || page.error) return;
+    writeListCache(listKey, {
+      items: page.items,
+      channel: page.channel,
+      reachedEnd: page.reachedEnd,
+      at: Date.now(),
+    });
+  }, [page, key, listKey]);
 
   const loadMore = useCallback(
     async (skip: number) => {
@@ -202,6 +293,34 @@ export function MessageList({
     },
     [key, patch, readFilter, onAccountsChanged],
   );
+
+  // 详情真正加载出来后置为已读:列表状态与账号未读数一起更新,
+  // 否则用户读完回来仍看到它标着未读。
+  //
+  // 触发条件由 MessageDetail 给出(服务端返回 is_read=false),不是点击时——
+  // 详情取失败就不该把这封标成已读。走批量已读同一条接口,而不是把
+  // 协议的 BODY.PEEK 改成非 PEEK:后者会让脚本拉详情也悄悄改状态,
+  // 而且服务端不会扣账号的未读缓存。
+  const markedSeqRef = useRef(0);
+  useEffect(() => {
+    if (!readSignal || readSignal.seq === markedSeqRef.current) return;
+    // 切账号后本组件会重挂载,不能让上一个账号的信号落到新账号头上。
+    if (readSignal.accountID !== accountID) return;
+    markedSeqRef.current = readSignal.seq;
+    // 列表里已经显示为已读就不再调接口:详情缓存里的 is_read 可能还是
+    // 置已读之前的旧值,重复上报会多扣一次账号未读数。
+    const current = view.items.find((m) => refKey(m) === refKey(readSignal.message));
+    if (current?.is_read) return;
+    void mailApi
+      .markMessagesRead(tenantID, accountID, [{ ...toRef(readSignal.message), was_unread: true }])
+      .then((resp) => {
+        const done = resp.data.items.filter((i) => i.ok).map((i) => i.ref);
+        if (done.length > 0) applyRead(done);
+      })
+      .catch(() => {
+        // 置已读失败不影响阅读本身;保持未读,下次打开会重新上报。
+      });
+  }, [readSignal, tenantID, accountID, applyRead, view.items]);
 
   const applyDelete = useCallback(
     (done: MessageRef[]) => {
@@ -302,7 +421,7 @@ export function MessageList({
       {view.error && <p className="px-3 py-2 text-sm text-kumo-danger">{view.error}</p>}
 
       {view.loading && view.items.length === 0 ? (
-        <p className="p-6 text-sm text-kumo-subtle">正在从服务器拉取邮件…</p>
+        <MessageListSkeleton />
       ) : visible.length === 0 && !view.error ? (
         <EmptyState
           icon={Envelope}

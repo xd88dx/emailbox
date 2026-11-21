@@ -47,6 +47,7 @@ P0–P4 的表到 `000005` 就齐了。转发、分享链接、本地邮件保�
 | `000016_drop_group_fallback_proxy` | 分组代理只留一个地址，删掉两个备用位；账号自己的代理仍是三列 | 2026-08-31 |
 | `000017_group_refresh_schedule` | 分组的定期令牌刷新：`refresh_interval_minutes` + `next_refresh_at` + 部分索引 | 2026-09-03 |
 | `000023_drop_audit_logs` | 移除审计日志表及其索引，删除历史记录；回滚仅恢复空表结构 | 2026-10-04 |
+| `000025_plan_translate` | `plans` 加 `daily_translate`(每日翻译配额,默认 200,-1 不限) | 2026-11-21 |
 
 每个迁移 sqlite / postgres 各一份 `.up.sql` / `.down.sql`。
 `000002_saas` 的表定义见 [08 文档 §2、§4](08-saas-admin.md)，不在本文重复。

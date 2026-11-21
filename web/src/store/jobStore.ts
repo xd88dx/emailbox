@@ -51,6 +51,9 @@ interface JobState {
 
   watch: (tenant: TenantRef, jobID: string, jobType?: string) => void;
   stopWatching: () => void;
+  // 本地已读/删除成功后调用:丢掉该账号的实时未读快照,让界面改用库里的值。
+  // 任务运行期间快照可能早于这次操作,不丢的话会把刚减少的未读数盖回去。
+  clearUnread: (accountID: string) => void;
   reset: () => void;
 }
 
@@ -177,6 +180,13 @@ export const useJobStore = create<JobState>((set, get) => ({
   },
 
   stopWatching: () => closeSource(),
+
+  clearUnread: (accountID) =>
+    set((state) => {
+      const item = state.byAccount[accountID];
+      if (!item || item.unread === undefined) return state;
+      return { byAccount: { ...state.byAccount, [accountID]: { ...item, unread: undefined } } };
+    }),
 
   reset: () => {
     closeSource();

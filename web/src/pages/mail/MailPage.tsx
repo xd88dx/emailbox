@@ -76,6 +76,7 @@ export default function MailPage({ scope }: MailPageProps = {}) {
   const jobType = useJobStore((s) => s.jobType);
   const checkResults = useJobStore((s) => s.byAccount);
   const jobStatus = useJobStore((s) => s.status);
+  const clearUnread = useJobStore((s) => s.clearUnread);
   // 检查结果只在任务运行期间当实时值用。任务结束后库里已经有同一次检查
   // 写回的数字，继续拿快照覆盖会让「已读/删除后未读数减少」看不见。
   // 绿/红点仍然按快照显示，它们表达的是定性结论，不受这个切换影响。
@@ -85,13 +86,31 @@ export default function MailPage({ scope }: MailPageProps = {}) {
   // editAccount 是另一条线（改配置），和「看信」互不影响，所以分开存。
   const [activeAccount, setActiveAccount] = useState<MailAccount | null>(null);
   const [openMessage, setOpenMessage] = useState<Message | null>(null);
+  // 详情真正加载完成后由 MessageDetail 通知,列表层据此置已读。
+  // seq 让同一封邮件每次重新打开都能上报一次(上一次可能没置成功)。
+  const [readSignal, setReadSignal] = useState<{
+    accountID: string;
+    message: Message;
+    seq: number;
+  } | null>(null);
   const [editAccount, setEditAccount] = useState<MailAccount | null>(null);
   const [exporting, setExporting] = useState(false);
 
   // reloadToken 让「刷新」按钮和批量操作完成后能重新触发下面的 effect，
   // 而不需要在事件处理器里再写一份取数逻辑。
   const [reloadToken, setReloadToken] = useState(0);
+  // 邮件返回后只需要重取账号列表(令牌/健康状态可能有变化),
+  // 分组与统计跟打开邮箱无关。共用一个 token 会让一次打开追加三个请求。
+  const [accountsToken, setAccountsToken] = useState(0);
   const reload = useCallback(() => setReloadToken((v) => v + 1), []);
+  const reloadAccounts = useCallback(() => setAccountsToken((v) => v + 1), []);
+  const activeAccountID = activeAccount?.id;
+  // 邮件列表里标已读/删除后:先让该账号的实时未读快照失效,再重取账号列表。
+  // 收信检查任务运行期间快照可能早于这次操作,不失效会把刚减少的未读数盖回去。
+  const onMessagesChanged = useCallback(() => {
+    if (activeAccountID) clearUnread(activeAccountID);
+    reloadAccounts();
+  }, [activeAccountID, clearUnread, reloadAccounts]);
 
   // 分组与统计只在换租户或任务结束/批量操作后重取:它们与筛选条件无关。
   // 之前它们和账号列表串在同一个 Promise.all 里,每切换一次状态都要等
@@ -152,7 +171,7 @@ export default function MailPage({ scope }: MailPageProps = {}) {
     return () => {
       ignore = true;
     };
-  }, [tenantID, groupID, query, status, refreshStatus, page, perPage, reloadToken]);
+  }, [tenantID, groupID, query, status, refreshStatus, page, perPage, reloadToken, accountsToken]);
 
   // 换筛选条件要做两件事：清空选中集、回到第 1 页。
   //
@@ -209,14 +228,28 @@ export default function MailPage({ scope }: MailPageProps = {}) {
   const closeAccount = useCallback(() => {
     setActiveAccount(null);
     setOpenMessage(null);
+    setReadSignal(null);
   }, []);
 
   // 点已经打开的那个邮箱＝收起右侧收件箱。桌面端不给这条路的话，
   // 收件箱一旦打开就关不掉了——那一栏的返回按钮只在移动端可见。
   const selectAccount = useCallback((account: MailAccount) => {
     setActiveAccount((prev) => (prev?.id === account.id ? null : account));
-    setOpenMessage(null); // 换邮箱等于换一批信，上一封的详情留着没有意义
+    setOpenMessage(null); // 换邮箱等于换一批信,上一封的详情留着没有意义
+    setReadSignal(null); // 不能让上一个账号的置已读信号落到新账号上
   }, []);
+
+  // 详情数据真正到手、且服务端说仍未读时才会被调用。
+  const onDetailLoaded = useCallback(
+    (message: Message) => {
+      setReadSignal((prev) => ({
+        accountID: activeAccount?.id ?? "",
+        message,
+        seq: (prev?.seq ?? 0) + 1,
+      }));
+    },
+    [activeAccount?.id],
+  );
 
   // 批量删除掉的信如果正好是详情栏里那封，详情要一起关掉——
   // 否则用户还能在那儿点附件下载，请求打到一封已经不存在的邮件上。
@@ -246,7 +279,8 @@ export default function MailPage({ scope }: MailPageProps = {}) {
         onOpen={setOpenMessage}
         onRemoved={onMessagesRemoved}
         onClose={closeAccount}
-        onAccountsChanged={reload}
+        onAccountsChanged={onMessagesChanged}
+        readSignal={readSignal}
       />
     </div>
   ) : null;
@@ -260,6 +294,7 @@ export default function MailPage({ scope }: MailPageProps = {}) {
           accountID={activeAccount.id}
           message={openMessage}
           onClose={() => setOpenMessage(null)}
+          onLoaded={onDetailLoaded}
         />
       </div>
     ) : null;

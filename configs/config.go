@@ -23,16 +23,17 @@ const (
 )
 
 type Config struct {
-	AppEnv   string         `json:"app_env"`
-	Server   ServerConfig   `json:"server"`
-	Database DatabaseConfig `json:"database"`
-	Session  SessionConfig  `json:"session"`
-	Crypto   CryptoConfig   `json:"crypto"`
-	SaaS     SaaSConfig     `json:"saas"`
-	Job      JobConfig      `json:"job"`
-	Mailer   MailerConfig   `json:"mailer"`
-	OAuth    OAuthConfig    `json:"oauth"`
-	Waffo    WaffoConfig    `json:"waffo"`
+	AppEnv    string            `json:"app_env"`
+	Server    ServerConfig      `json:"server"`
+	Database  DatabaseConfig    `json:"database"`
+	Session   SessionConfig     `json:"session"`
+	Crypto    CryptoConfig      `json:"crypto"`
+	SaaS      SaaSConfig        `json:"saas"`
+	Job       JobConfig         `json:"job"`
+	Mailer    MailerConfig      `json:"mailer"`
+	OAuth     OAuthConfig       `json:"oauth"`
+	Waffo     WaffoConfig       `json:"waffo"`
+	Translate TranslationConfig `json:"translate"`
 }
 type ServerConfig struct {
 	Port        string   `json:"port"`
@@ -53,6 +54,39 @@ type DatabaseConfig struct {
 type SessionConfig struct {
 	ExpireHour   int  `json:"expire_hour"`
 	CookieSecure bool `json:"cookie_secure"`
+}
+
+// 翻译兜底引擎的协议名。两者都是显式配置,不存在「没配也能用」的默认端点。
+const (
+	TranslateProviderLibre = "libretranslate"
+	TranslateProviderDeepL = "deepl"
+)
+
+// TranslationConfig 是正文翻译的配置。
+//
+// LLM 是首选,传统引擎是兜底;两者都没有时功能对用户隐藏。任何一项配了一半
+// 都按配置非法处理——那几乎总是漏写或拼错变量名,静默关掉功能会让部署方
+// 以为翻译没生效是模型的问题。
+type TranslationConfig struct {
+	LLMBaseURL string `json:"llm_baseurl"`
+	LLMAPIKey  string `json:"-"`
+	LLMModel   string `json:"llm_model"`
+	// LLMTimeoutSeconds 只约束翻译请求,不能沿用邮件接口的 120 秒:
+	// 模型不可达时,用户不该为一次点击等两分钟。
+	LLMTimeoutSeconds int `json:"llm_timeout_seconds"`
+
+	FallbackProvider string `json:"fallback_provider"`
+	FallbackURL      string `json:"fallback_url"`
+	// FallbackAPIKeys 是逗号分隔的多把 key(DeepL 支持轮询),
+	// 单 key 的配置写法不变。
+	FallbackAPIKeys []string `json:"-"`
+}
+
+func (c TranslationConfig) LLMEnabled() bool { return c.LLMBaseURL != "" }
+
+// Enabled 表示至少有一种引擎可用。前端据此决定是否显示翻译按钮。
+func (c TranslationConfig) Enabled() bool {
+	return c.LLMEnabled() || c.FallbackProvider != ""
 }
 
 // CryptoConfig 是敏感字段加密的配置。密钥独立于会话密钥，
@@ -170,6 +204,15 @@ func Init() error {
 	if err != nil {
 		return err
 	}
+	translateCfg := TranslationConfig{
+		LLMBaseURL:        strings.TrimRight(strings.TrimSpace(getEnv("LLM_BASEURL", "")), "/"),
+		LLMAPIKey:         strings.TrimSpace(getEnv("LLM_APIKEY", "")),
+		LLMModel:          strings.TrimSpace(getEnv("LLM_MODEL", "")),
+		LLMTimeoutSeconds: getEnvInt("LLM_TIMEOUT_SECONDS", 20),
+		FallbackProvider:  strings.ToLower(strings.TrimSpace(getEnv("TRANSLATE_FALLBACK_PROVIDER", ""))),
+		FallbackURL:       strings.TrimRight(strings.TrimSpace(getEnv("TRANSLATE_FALLBACK_URL", "")), "/"),
+		FallbackAPIKeys:   splitAPIKeys(getEnv("TRANSLATE_FALLBACK_APIKEY", "")),
+	}
 	returnURL := strings.TrimSpace(getEnv("OAUTH_RETURN_URL", ""))
 	if returnURL == "" {
 		// 兼容旧配置名，避免升级后已完成授权的部署丢失回跳地址。
@@ -189,7 +232,7 @@ func Init() error {
 		WebhookProdKey: getEnv("WAFFO_WEBHOOK_PROD_PUBLIC_KEY", ""),
 		// 留空时按请求域名推导，见 BillingService.successURLFor。
 		SuccessURL: strings.TrimSpace(getEnv("WAFFO_SUCCESS_URL", "")),
-	}}
+	}, Translate: translateCfg}
 	if AppConfig.Database.Driver != "sqlite" && AppConfig.Database.Driver != "postgres" && AppConfig.Database.Driver != "postgresql" {
 		return fmt.Errorf("DB_DRIVER 仅支持 sqlite 或 postgres")
 	}
@@ -202,6 +245,9 @@ func Init() error {
 		return err
 	}
 	if err := validateWaffo(AppConfig); err != nil {
+		return err
+	}
+	if err := validateTranslation(AppConfig); err != nil {
 		return err
 	}
 	return validateCrypto(AppConfig)
@@ -314,6 +360,79 @@ func validateOAuth(c *Config) error {
 		if err != nil || u.Scheme == "" || u.Host == "" {
 			return fmt.Errorf("%s 含非法 URL %q", name, raw)
 		}
+	}
+	return nil
+}
+
+// validateTranslation 校验翻译配置。
+//
+// 一项都不配是合法状态(功能关闭);只配一半几乎总是漏写或拼错变量名,
+// 必须报错——否则部署方会以为是模型或网络的问题。
+func validateTranslation(c *Config) error {
+	t := c.Translate
+	if t.LLMBaseURL != "" || t.LLMAPIKey != "" || t.LLMModel != "" {
+		missing := make([]string, 0, 3)
+		if t.LLMBaseURL == "" {
+			missing = append(missing, "LLM_BASEURL")
+		}
+		if t.LLMAPIKey == "" {
+			missing = append(missing, "LLM_APIKEY")
+		}
+		if t.LLMModel == "" {
+			missing = append(missing, "LLM_MODEL")
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("LLM 翻译配置不完整:缺少 %s", strings.Join(missing, ", "))
+		}
+		if err := validateHTTPURL("LLM_BASEURL", t.LLMBaseURL); err != nil {
+			return err
+		}
+		if t.LLMTimeoutSeconds <= 0 {
+			return fmt.Errorf("LLM_TIMEOUT_SECONDS 必须大于 0")
+		}
+	}
+
+	switch t.FallbackProvider {
+	case "":
+		if t.FallbackURL != "" || len(t.FallbackAPIKeys) > 0 {
+			return fmt.Errorf("配置了 TRANSLATE_FALLBACK_URL/TRANSLATE_FALLBACK_APIKEY 但没指定 TRANSLATE_FALLBACK_PROVIDER")
+		}
+	case TranslateProviderLibre, TranslateProviderDeepL:
+		if t.FallbackURL == "" {
+			return fmt.Errorf("TRANSLATE_FALLBACK_PROVIDER=%s 时必须配置 TRANSLATE_FALLBACK_URL", t.FallbackProvider)
+		}
+		if err := validateHTTPURL("TRANSLATE_FALLBACK_URL", t.FallbackURL); err != nil {
+			return err
+		}
+		if t.FallbackProvider == TranslateProviderDeepL && len(t.FallbackAPIKeys) == 0 {
+			return fmt.Errorf("DeepL 兜底必须配置 TRANSLATE_FALLBACK_APIKEY")
+		}
+		if t.FallbackProvider == TranslateProviderLibre && len(t.FallbackAPIKeys) > 1 {
+			return fmt.Errorf("LibreTranslate 只支持一个 API Key,多 key 轮询仅 DeepL 可用")
+		}
+	default:
+		return fmt.Errorf("TRANSLATE_FALLBACK_PROVIDER 仅支持 %s / %s",
+			TranslateProviderLibre, TranslateProviderDeepL)
+	}
+	return nil
+}
+
+// splitAPIKeys 解析逗号分隔的 key 列表,顺带去掉空项。
+func splitAPIKeys(raw string) []string {
+	parts := strings.Split(raw, ",")
+	keys := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			keys = append(keys, p)
+		}
+	}
+	return keys
+}
+
+func validateHTTPURL(name, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("%s 含非法 URL %q", name, raw)
 	}
 	return nil
 }

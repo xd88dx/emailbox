@@ -3,22 +3,30 @@ package handler
 import (
 	"archive/zip"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"emailbox/pkg/mailer"
 	"emailbox/pkg/service"
+	"emailbox/pkg/translate"
 
 	"github.com/labstack/echo/v5"
 )
 
-type MessageHandler struct{ service *service.MessageService }
+type MessageHandler struct {
+	service     *service.MessageService
+	translation *service.TranslationService
+}
 
-func NewMessageHandler(s *service.MessageService) *MessageHandler {
-	return &MessageHandler{service: s}
+func NewMessageHandler(s *service.MessageService, t *service.TranslationService) *MessageHandler {
+	return &MessageHandler{service: s, translation: t}
 }
 
 // batchRequest 是批量标已读/删除的请求体。
@@ -64,6 +72,87 @@ func (h *MessageHandler) Detail(c *echo.Context) error {
 		return mailError(c, err)
 	}
 	return success(c, detail, "获取成功")
+}
+
+// translateEvent 是推给前端的单帧译文。Final=false 表示后面可能还有
+// 大模型的替换结果。
+type translateEvent struct {
+	Text      string `json:"text"`
+	Engine    string `json:"engine"`
+	Truncated bool   `json:"truncated"`
+	Cached    bool   `json:"cached"`
+	Final     bool   `json:"final"`
+}
+
+// TranslateStream 用 SSE 推送翻译:快引擎先到先显示,大模型结果到达后
+// 再推一帧 Final=true 用于替换。预检失败仍返回普通 JSON 错误,
+// 前端按 Content-Type 区分。
+func (h *MessageHandler) TranslateStream(c *echo.Context) error {
+	q := c.Request().URL.Query()
+	events, err := h.translation.Stream(c.Request().Context(),
+		c.Param("tenantID"), c.Param("accountID"),
+		folderParam(c), c.Param("messageID"), q.Get("id_mode"))
+	if err != nil {
+		return translateError(c, err)
+	}
+
+	w, werr := NewSSEWriter(c)
+	if werr != nil {
+		slog.Warn("翻译流未能取消写超时", "error", werr)
+	}
+	ticker := time.NewTicker(SSEKeepaliveInterval)
+	defer ticker.Stop()
+
+	var id int64
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				return nil
+			}
+			id++
+			if ev.Err != nil {
+				slog.Warn("翻译失败", "error", ev.Err)
+				data, _ := json.Marshal(map[string]any{
+					"code":    CodeTranslateUnavailable,
+					"message": "翻译服务暂时不可用,请稍后重试",
+				})
+				if err := w.Send(id, "error", string(data)); err != nil {
+					return nil
+				}
+				continue
+			}
+			data, _ := json.Marshal(translateEvent{
+				Text:      ev.Result.Text,
+				Engine:    ev.Result.Engine,
+				Truncated: ev.Result.Truncated,
+				Cached:    ev.Result.Cached,
+				Final:     ev.Final,
+			})
+			if err := w.Send(id, "result", string(data)); err != nil {
+				return nil
+			}
+		case <-ticker.C:
+			if err := w.Keepalive(); err != nil {
+				return nil
+			}
+		}
+	}
+}
+
+func translateError(c *echo.Context, err error) error {
+	switch {
+	case errors.Is(err, translate.ErrUnavailable):
+		return c.JSON(http.StatusBadGateway, map[string]any{
+			"code":    CodeTranslateUnavailable,
+			"data":    map[string]any{"error_kind": "translate_unavailable"},
+			"message": err.Error(),
+		})
+	case errors.Is(err, translate.ErrEmptyText):
+		return failure(c, http.StatusBadRequest, err)
+	default:
+		return mailError(c, err)
+	}
 }
 
 func (h *MessageHandler) Attachment(c *echo.Context) error {

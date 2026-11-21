@@ -30,6 +30,7 @@ export interface Plan {
   max_accounts: number;
   max_groups: number;
   daily_mail_fetch: number;
+  daily_translate: number;
   created_at: string;
   updated_at: string;
 }

@@ -2,8 +2,10 @@ package imapx
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"emailbox/pkg/mailer"
 
@@ -27,8 +29,27 @@ func (c *Client) selectFolder(s *session, cred mailer.Credential, folder mailer.
 	provider := providerCode(cred)
 	tried := make([]string, 0, 8)
 
+	// 上次解析成功的名字先试:候选表里垃圾箱往往要试好几个别名才中,
+	// 而那几次失败都是完整往返。选失败说明邮箱被改名或删了,清掉缓存走原流程。
+	folderKey := ""
+	if c.cfg.Pool != nil && c.cfg.PoolScope != "" {
+		folderKey = c.cfg.PoolScope + "\x00" + c.cfg.Channel + "\x00" + string(folder)
+		if name := c.cfg.Pool.folderFor(folderKey); name != "" {
+			if data, err := s.imap.Select(name, nil).Wait(); err == nil {
+				return data.NumMessages, nil
+			}
+			c.cfg.Pool.forgetFolder(folderKey)
+		}
+	}
+	remember := func(name string) {
+		if folderKey != "" {
+			c.cfg.Pool.rememberFolder(folderKey, name)
+		}
+	}
+
 	for _, name := range FolderCandidates(provider, folder) {
 		if data, err := s.imap.Select(name, nil).Wait(); err == nil {
+			remember(name)
 			return data.NumMessages, nil
 		}
 		tried = append(tried, name)
@@ -44,6 +65,7 @@ func (c *Client) selectFolder(s *session, cred mailer.Credential, folder mailer.
 	}
 	for _, match := range MatchFolders(folder, mailboxes) {
 		if data, err := s.imap.Select(match.Name, nil).Wait(); err == nil {
+			remember(match.Name)
 			return data.NumMessages, nil
 		}
 		tried = append(tried, match.Name)
@@ -121,6 +143,21 @@ func (c *Client) list(
 
 	return withSession(ctx, c, cred, func(_ context.Context, s *session) (mailer.ListResult, error) {
 		var result mailer.ListResult
+		opStart := time.Now()
+		selectMS, fetchMS := int64(-1), int64(-1)
+		// 一条日志把「复用与否 + 选文件夹 + FETCH」摊开:建连已经单独记过,
+		// 两段都很快却整体仍慢时,问题在代理链路或上游本身。
+		defer func() {
+			slog.Info("IMAP 列表耗时",
+				"channel", c.cfg.Channel,
+				"folder", opt.Folder,
+				"reused", s.reused,
+				"select_ms", selectMS,
+				"fetch_ms", fetchMS,
+				"count", len(result.Messages),
+				"elapsed_ms", time.Since(opStart).Milliseconds(),
+			)
+		}()
 		// STATUS 要在 SELECT 之前发：RFC 3501 不建议对当前选中的邮箱用 STATUS。
 		// 查不到不影响列表——未读数只是一个缓存值，下一次检查仍会写回。
 		if withUnread && opt.Folder == mailer.FolderInbox {
@@ -130,7 +167,9 @@ func (c *Client) list(
 				result.Unread = &count
 			}
 		}
+		selectStart := time.Now()
 		total, err := c.selectFolder(s, cred, opt.Folder)
+		selectMS = time.Since(selectStart).Milliseconds()
 		if err != nil {
 			return mailer.ListResult{}, err
 		}
@@ -157,7 +196,9 @@ func (c *Client) list(
 			RFC822Size:    true,
 			BodyStructure: &imap.FetchItemBodyStructure{},
 		}
+		fetchStart := time.Now()
 		buffers, err := s.imap.Fetch(seqSet, fetchOpt).Collect()
+		fetchMS = time.Since(fetchStart).Milliseconds()
 		if err != nil {
 			return mailer.ListResult{}, errorf(c.cfg.Channel, mailer.ErrKindProviderError, err, "抓取邮件列表失败")
 		}

@@ -13,6 +13,9 @@ const Unlimited = -1
 const (
 	MetricMailFetch    = "mail_fetch"
 	MetricTokenRefresh = "token_refresh"
+	// MetricTranslate 是显式翻译动作的次数。它同样走 CheckAndConsume:
+	// 翻译要打外部付费服务,超额时必须一个远端请求都不产生。
+	MetricTranslate = "translate"
 )
 
 // Plan 是套餐，提供配额的基线值。
@@ -24,6 +27,7 @@ type Plan struct {
 	MaxAccounts    int       `json:"max_accounts"`
 	MaxGroups      int       `json:"max_groups"`
 	DailyMailFetch int       `json:"daily_mail_fetch"`
+	DailyTranslate int       `json:"daily_translate"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
@@ -39,13 +43,17 @@ type Limits struct {
 	MaxAccounts    int    `json:"max_accounts"`
 	MaxGroups      int    `json:"max_groups"`
 	DailyMailFetch int    `json:"daily_mail_fetch"`
+	DailyTranslate int    `json:"daily_translate"`
 }
 
 // LimitFor 返回某个按天计数指标的上限，未知指标视为不限。
 // token_refresh 就落在「不限」这一支：它只记账，见 quota.Service.Record。
 func (l Limits) LimitFor(metric string) int {
-	if metric == MetricMailFetch {
+	switch metric {
+	case MetricMailFetch:
 		return l.DailyMailFetch
+	case MetricTranslate:
+		return l.DailyTranslate
 	}
 	return Unlimited
 }

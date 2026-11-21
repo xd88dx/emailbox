@@ -61,7 +61,8 @@ SELECT
     pl.name          AS plan_name,
     pl.max_accounts  AS max_accounts,
     pl.max_groups    AS max_groups,
-    pl.daily_mail_fetch AS daily_mail_fetch
+    pl.daily_mail_fetch AS daily_mail_fetch,
+    pl.daily_translate AS daily_translate
 FROM tenant_quotas AS tq
 JOIN plans AS pl ON pl.id = tq.plan_id
 WHERE tq.tenant_id = ?
@@ -75,6 +76,7 @@ type GetEffectiveQuotaRow struct {
 	MaxAccounts    int64
 	MaxGroups      int64
 	DailyMailFetch int64
+	DailyTranslate int64
 }
 
 // Limits come straight from the plan: there are no per-tenant overrides.
@@ -90,6 +92,7 @@ func (q *Queries) GetEffectiveQuota(ctx context.Context, tenantID string) (GetEf
 		&i.MaxAccounts,
 		&i.MaxGroups,
 		&i.DailyMailFetch,
+		&i.DailyTranslate,
 	)
 	return i, err
 }

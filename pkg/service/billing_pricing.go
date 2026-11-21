@@ -63,5 +63,6 @@ func publicPlan(p model.Plan) model.PublicPlan {
 		MaxAccounts:    p.MaxAccounts,
 		MaxGroups:      p.MaxGroups,
 		DailyMailFetch: p.DailyMailFetch,
+		DailyTranslate: p.DailyTranslate,
 	}
 }

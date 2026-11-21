@@ -10,6 +10,7 @@ export interface QuotaUsage {
     groups: number;
     mail_fetch: number;
     token_refresh: number;
+    translate: number;
   };
   // 频次类用量的统计日期（按租户时区），供前端说明「明日重置」。
   day: string;

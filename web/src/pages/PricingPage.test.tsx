@@ -32,13 +32,20 @@ describe("公开定价", () => {
       message: "",
       data: {
         billing_enabled: true,
-        free_plan: { name: "入门", max_accounts: 37, max_groups: -1, daily_mail_fetch: 823 },
+        free_plan: {
+          name: "入门",
+          max_accounts: 37,
+          max_groups: -1,
+          daily_mail_fetch: 823,
+          daily_translate: 200,
+        },
         paid_plans: [
           {
             name: "进阶",
             max_accounts: 250,
             max_groups: 20,
             daily_mail_fetch: 5000,
+            daily_translate: 1000,
             prices: [
               { billing_period: "monthly", currency: "USD", amount: "9.90" },
               { billing_period: "yearly", currency: "USD", amount: "99.00" },

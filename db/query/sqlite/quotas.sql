@@ -15,7 +15,8 @@ SELECT
     pl.name          AS plan_name,
     pl.max_accounts  AS max_accounts,
     pl.max_groups    AS max_groups,
-    pl.daily_mail_fetch AS daily_mail_fetch
+    pl.daily_mail_fetch AS daily_mail_fetch,
+    pl.daily_translate AS daily_translate
 FROM tenant_quotas AS tq
 JOIN plans AS pl ON pl.id = tq.plan_id
 WHERE tq.tenant_id = ?;
