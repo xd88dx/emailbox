@@ -56,9 +56,7 @@ describe("translateMessageStream", () => {
   });
 
   it("引擎全失败时按错误帧回调", async () => {
-    stubStream([
-      'event: error\ndata: {"code":1006,"message":"翻译服务暂时不可用,请稍后重试"}\n\n',
-    ]);
+    stubStream(['event: error\ndata: {"code":1006,"message":"翻译服务暂时不可用,请稍后重试"}\n\n']);
     const { results, errors } = await run();
     expect(results).toEqual([]);
     expect(errors).toEqual(["翻译服务暂时不可用,请稍后重试"]);

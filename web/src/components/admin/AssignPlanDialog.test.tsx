@@ -38,7 +38,7 @@ function mockData(subscription: TenantPlan["subscription"] = null) {
         max_accounts: 50,
         max_groups: 20,
         daily_mail_fetch: 1000,
-  daily_translate: 200,
+        daily_translate: 200,
       },
       subscription,
     },

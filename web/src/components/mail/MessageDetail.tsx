@@ -137,12 +137,16 @@ export function MessageDetail({
   const translationEnabled = useAuthStore((s) => s.translationEnabled);
   const [translation, setTranslation] = useState(() => {
     const cached = cachedTranslation(key);
-    return cached ? { key, result: cached, loading: false, upgrading: false, error: "" } : emptyTranslation(key);
+    return cached
+      ? { key, result: cached, loading: false, upgrading: false, error: "" }
+      : emptyTranslation(key);
   });
   let tview = translation;
   if (translation.key !== key) {
     const cached = cachedTranslation(key);
-    tview = cached ? { key, result: cached, loading: false, upgrading: false, error: "" } : emptyTranslation(key);
+    tview = cached
+      ? { key, result: cached, loading: false, upgrading: false, error: "" }
+      : emptyTranslation(key);
     setTranslation(tview);
   }
 
