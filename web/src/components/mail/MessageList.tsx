@@ -1,4 +1,5 @@
 import { Button, RefreshButton } from "@cloudflare/kumo/components/button";
+import { Checkbox } from "@cloudflare/kumo/components/checkbox";
 import { CaretLeft, Envelope, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -11,7 +12,7 @@ import {
 } from "@/api/mail";
 import { EmptyState } from "./EmptyState";
 import { FolderTabs } from "./FolderTabs";
-import { MessageBatchBar } from "./MessageBatchBar";
+import { MessageBatchActions } from "./MessageBatchActions";
 import { MessageFilterPills, type ReadFilter } from "./MessageFilterPills";
 import { refKey } from "./messageRef";
 import { MESSAGE_ROW_HEIGHT, MessageRow } from "./MessageRow";
@@ -229,6 +230,22 @@ export function MessageList({
       ? view.items
       : view.items.filter((m) => (readFilter === "unread" ? !m.is_read : m.is_read));
 
+  // 全选只作用于当前筛选下可见的邮件:列表是按需分页加载的,
+  // 把未加载的邮件也算进来,用户以为选了几封、实际会动到整个文件夹。
+  const visibleKeys = visible.map(refKey);
+  const selectedVisible = visibleKeys.filter((k) => view.selected.has(k)).length;
+  const allVisibleSelected = visibleKeys.length > 0 && selectedVisible === visibleKeys.length;
+
+  const toggleAllVisible = () =>
+    patch(key, (prev) => {
+      const selected = new Set(prev.selected);
+      for (const k of visibleKeys) {
+        if (allVisibleSelected) selected.delete(k);
+        else selected.add(k);
+      }
+      return { ...prev, selected };
+    });
+
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-kumo-line px-3">
@@ -265,16 +282,22 @@ export function MessageList({
       </header>
 
       <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-kumo-line px-3 py-1.5">
+        <Checkbox
+          checked={allVisibleSelected}
+          indeterminate={selectedVisible > 0 && !allVisibleSelected}
+          disabled={visibleKeys.length === 0}
+          onCheckedChange={toggleAllVisible}
+          aria-label="全选当前列表的邮件"
+        />
         <MessageFilterPills value={readFilter} onChange={setReadFilter} counts={counts} />
+        <MessageBatchActions
+          tenantID={tenantID}
+          accountID={accountID}
+          messages={selectedMessages}
+          onRead={applyRead}
+          onDelete={applyDelete}
+        />
       </div>
-
-      <MessageBatchBar
-        tenantID={tenantID}
-        accountID={accountID}
-        messages={selectedMessages}
-        onRead={applyRead}
-        onDelete={applyDelete}
-      />
 
       {view.error && <p className="px-3 py-2 text-sm text-kumo-danger">{view.error}</p>}
 

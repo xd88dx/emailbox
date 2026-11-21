@@ -294,7 +294,7 @@ GroupList.tsx        GroupManagerDialog.tsx GroupDot.tsx           GroupFormDial
 GroupDeleteDialog.tsx
 AccountList.tsx      AccountFilterBar.tsx  AccountDrawer.tsx      ExportDialog.tsx
 MessageList.tsx      MessageRow.tsx        FolderTabs.tsx         MessageFilterPills.tsx
-MessageDetail.tsx    MessageBody.tsx       AttachmentList.tsx     MessageBatchBar.tsx
+MessageDetail.tsx    MessageBody.tsx       AttachmentList.tsx     MessageBatchActions.tsx
 VirtualList.tsx      EmptyState.tsx
 ```
 
