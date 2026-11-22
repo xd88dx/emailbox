@@ -150,14 +150,33 @@ export function MailSidebar({
         collapsed ? "w-14" : "w-(--ebx-sidebar-w)"
       }`}
     >
-      <div className="flex h-11 shrink-0 items-center justify-end border-b border-kumo-line px-2">
+      {/* 与账号筛选栏同一高度（--ebx-panel-top-h），这一行的底边才能和
+          搜索框那一行连成水平线。展开态把「账号状态」标题并进来：它原先独占
+          一行，把下面四个统计行整体压低约 28px，正好和右侧表头行错开。
+          标题同时仍是状态区的折叠开关。 */}
+      <div className="flex h-(--ebx-panel-top-h) shrink-0 items-center justify-between border-b border-kumo-line px-2">
+        {!collapsed && (
+          <button
+            type="button"
+            onClick={toggleStatus}
+            aria-expanded={statusOpen}
+            className="flex min-w-0 items-center gap-1 text-left text-xs font-medium tracking-wide text-kumo-subtle uppercase hover:text-kumo-strong"
+          >
+            <CaretRight
+              size={10}
+              weight="bold"
+              className={`shrink-0 transition-transform ${statusOpen ? "rotate-90" : ""}`}
+            />
+            <span className="truncate">账号状态</span>
+          </button>
+        )}
         <button
           type="button"
           aria-label={collapsed ? "展开邮箱侧栏" : "收起邮箱侧栏"}
           aria-expanded={!collapsed}
           title={collapsed ? "展开邮箱侧栏" : "收起邮箱侧栏"}
           onClick={toggleCollapsed}
-          className="grid size-8 place-items-center rounded-lg text-kumo-subtle hover:bg-kumo-interact hover:text-kumo-strong"
+          className="ml-auto grid size-8 shrink-0 place-items-center rounded-lg text-kumo-subtle hover:bg-kumo-interact hover:text-kumo-strong"
         >
           {collapsed ? <CaretRight size={16} /> : <CaretLeft size={16} />}
         </button>
@@ -176,18 +195,22 @@ export function MailSidebar({
         />
       ) : (
         <>
-          <Section title="账号状态" open={statusOpen} onToggle={toggleStatus}>
-            {STATUS_ITEMS.map((item) => (
-              <SidebarRow
-                key={item.value || "all"}
-                label={item.label}
-                count={countOf(item.value)}
-                selected={refreshStatus === item.value}
-                onSelect={() => onRefreshStatusChange(item.value)}
-                leading={<StatusDot tone={item.tone} />}
-              />
-            ))}
-          </Section>
+          {/* 标题已并入顶部行，这里只渲染状态行；四行各占 --ebx-subhead-h，
+              首行底边因此与右侧「邮箱」表头底边落在同一条水平线上。 */}
+          {statusOpen && (
+            <div className="px-2">
+              {STATUS_ITEMS.map((item) => (
+                <SidebarRow
+                  key={item.value || "all"}
+                  label={item.label}
+                  count={countOf(item.value)}
+                  selected={refreshStatus === item.value}
+                  onSelect={() => onRefreshStatusChange(item.value)}
+                  leading={<StatusDot tone={item.tone} />}
+                />
+              ))}
+            </div>
+          )}
 
           <Section
             title="邮箱分组"
