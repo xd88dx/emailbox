@@ -29,6 +29,17 @@ func (h *UserHandler) Update(c *echo.Context) error {
 	}
 	return success(c, v, "更新成功")
 }
+func (h *UserHandler) UpdateAutoRefresh(c *echo.Context) error {
+	var req model.UpdateAutoRefreshRequest
+	if e := c.Bind(&req); e != nil {
+		return failure(c, 400, e)
+	}
+	v, e := h.service.UpdateAutoRefresh(c.Request().Context(), middleware.UserID(c), req)
+	if e != nil {
+		return failure(c, 400, e)
+	}
+	return success(c, v, "更新成功")
+}
 func (h *UserHandler) ChangePassword(c *echo.Context) error {
 	var req model.ChangePasswordRequest
 	if e := c.Bind(&req); e != nil {

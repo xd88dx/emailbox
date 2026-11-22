@@ -16,9 +16,12 @@ interface AuthState {
   desktop: boolean;
   // 部署能力,和 desktop 一样不随登出清掉:同一进程的配置不会因为没人登录就变。
   translationEnabled: boolean;
+  // 部署默认的自动刷新间隔(分钟),0 表示默认关闭。
+  autoRefreshDefaultMinutes: number;
   loadSession: () => Promise<AuthResponse | null>;
   login: (data: LoginRequest) => Promise<AuthResponse>;
   register: (data: RegisterRequest) => Promise<AuthResponse>;
+  updateAutoRefresh: (enabled: boolean, minutes: number) => Promise<void>;
   logout: () => Promise<void>;
   setUser: (user: User) => void;
   clearAuth: () => void;
@@ -36,6 +39,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   loading: true,
   desktop: false,
   translationEnabled: false,
+  autoRefreshDefaultMinutes: 0,
   loadSession: async () => {
     if (sessionInFlight) return sessionInFlight;
     sessionInFlight = (async () => {
@@ -47,6 +51,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           loading: false,
           desktop: r.data.desktop,
           translationEnabled: r.data.translation_enabled,
+          autoRefreshDefaultMinutes: r.data.auto_refresh_default_minutes,
         });
         return r.data;
       } catch {
@@ -68,6 +73,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       isAuthenticated: true,
       desktop: r.data.desktop,
       translationEnabled: r.data.translation_enabled,
+      autoRefreshDefaultMinutes: r.data.auto_refresh_default_minutes,
     });
     return r.data;
   },
@@ -78,8 +84,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       isAuthenticated: true,
       desktop: r.data.desktop,
       translationEnabled: r.data.translation_enabled,
+      autoRefreshDefaultMinutes: r.data.auto_refresh_default_minutes,
     });
     return r.data;
+  },
+  updateAutoRefresh: async (enabled, minutes) => {
+    const r = await userApi.updateAutoRefresh({ enabled, minutes });
+    set({ user: r.data });
   },
   logout: async () => {
     try {

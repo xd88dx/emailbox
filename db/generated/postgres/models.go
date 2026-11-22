@@ -276,14 +276,16 @@ type UsageCounter struct {
 }
 
 type User struct {
-	ID           string
-	Username     string
-	Email        string
-	PasswordHash string
-	Status       string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    sql.NullTime
-	PlatformRole string
-	LastLoginAt  sql.NullTime
+	ID                 string
+	Username           string
+	Email              string
+	PasswordHash       string
+	Status             string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          sql.NullTime
+	PlatformRole       string
+	LastLoginAt        sql.NullTime
+	AutoRefreshEnabled sql.NullBool
+	AutoRefreshMinutes sql.NullInt32
 }

@@ -297,3 +297,62 @@ func TestDisabledUserSessionIsRejected(t *testing.T) {
 		t.Fatal("被禁用用户的会话仍然有效")
 	}
 }
+
+// 自动刷新偏好必须真的落库：接口返回改了但库里没改，用户刷新页面就会看到开关自己弹回去。
+func TestAutoRefreshPreferencePersists(t *testing.T) {
+	configs.AppConfig = &configs.Config{Session: configs.SessionConfig{ExpireHour: 24}}
+	store := testStore(t)
+	ctx := context.Background()
+	auth := service.NewAuthService(store)
+	alice, _, err := auth.Register(ctx, model.RegisterRequest{Username: "alice", Password: "secret12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := service.NewUserService(store)
+	id := alice.User.ID
+
+	// 从没设置过时两个字段都是 nil，前端据此跟随部署默认值。
+	got, err := users.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AutoRefreshEnabled != nil || got.AutoRefreshMinutes != nil {
+		t.Fatalf("新用户不应带自动刷新偏好: enabled=%v minutes=%v", got.AutoRefreshEnabled, got.AutoRefreshMinutes)
+	}
+
+	if _, err := users.UpdateAutoRefresh(ctx, id, model.UpdateAutoRefreshRequest{Enabled: true, Minutes: 10}); err != nil {
+		t.Fatal(err)
+	}
+	// 关闭时不传间隔，应保留已记住的 10 分钟。
+	got, err = users.UpdateAutoRefresh(ctx, id, model.UpdateAutoRefreshRequest{Enabled: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AutoRefreshEnabled == nil || *got.AutoRefreshEnabled {
+		t.Fatalf("应已关闭: %v", got.AutoRefreshEnabled)
+	}
+	if got.AutoRefreshMinutes == nil || *got.AutoRefreshMinutes != 10 {
+		t.Fatalf("关闭后应保留间隔: %v", got.AutoRefreshMinutes)
+	}
+
+	// 重新读一次，确认落库而不是只改了返回值。
+	got, err = users.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AutoRefreshMinutes == nil || *got.AutoRefreshMinutes != 10 {
+		t.Fatalf("重新读取后间隔丢失: %v", got.AutoRefreshMinutes)
+	}
+
+	// 越界间隔，以及「想开启但从没选过间隔」都要拒绝。
+	bob, _, err := auth.Register(ctx, model.RegisterRequest{Username: "bob", Password: "secret12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := users.UpdateAutoRefresh(ctx, bob.User.ID, model.UpdateAutoRefreshRequest{Enabled: true, Minutes: model.MinAutoRefreshMinutes - 1}); err == nil {
+		t.Error("过小的间隔应被拒绝")
+	}
+	if _, err := users.UpdateAutoRefresh(ctx, bob.User.ID, model.UpdateAutoRefreshRequest{Enabled: true}); err == nil {
+		t.Error("没有间隔就开启应被拒绝")
+	}
+}

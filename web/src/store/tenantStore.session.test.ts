@@ -17,6 +17,8 @@ const user = (id: string) => ({
   email: `${id}@example.com`,
   status: "active" as const,
   platform_role: "user" as const,
+  auto_refresh_enabled: null,
+  auto_refresh_minutes: null,
 });
 
 describe("会话切换时的租户数据隔离", () => {
@@ -46,6 +48,7 @@ describe("会话切换时的租户数据隔离", () => {
       active_tenant_id: "beta",
       desktop: false,
       translation_enabled: false,
+      auto_refresh_default_minutes: 0,
     });
 
     const state = useTenantStore.getState();

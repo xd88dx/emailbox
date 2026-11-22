@@ -7,6 +7,7 @@ package postgresdb
 
 import (
 	"context"
+	"database/sql"
 )
 
 const countPlatformAdmins = `-- name: CountPlatformAdmins :one
@@ -44,7 +45,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, email, password_hash, status, created_at, updated_at, deleted_at, platform_role, last_login_at FROM users WHERE id = $1 AND deleted_at IS NULL LIMIT 1
+SELECT id, username, email, password_hash, status, created_at, updated_at, deleted_at, platform_role, last_login_at, auto_refresh_enabled, auto_refresh_minutes FROM users WHERE id = $1 AND deleted_at IS NULL LIMIT 1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -61,12 +62,14 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.DeletedAt,
 		&i.PlatformRole,
 		&i.LastLoginAt,
+		&i.AutoRefreshEnabled,
+		&i.AutoRefreshMinutes,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, email, password_hash, status, created_at, updated_at, deleted_at, platform_role, last_login_at FROM users WHERE username = $1 AND deleted_at IS NULL LIMIT 1
+SELECT id, username, email, password_hash, status, created_at, updated_at, deleted_at, platform_role, last_login_at, auto_refresh_enabled, auto_refresh_minutes FROM users WHERE username = $1 AND deleted_at IS NULL LIMIT 1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -83,8 +86,29 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.DeletedAt,
 		&i.PlatformRole,
 		&i.LastLoginAt,
+		&i.AutoRefreshEnabled,
+		&i.AutoRefreshMinutes,
 	)
 	return i, err
+}
+
+const updateUserAutoRefresh = `-- name: UpdateUserAutoRefresh :execrows
+UPDATE users SET auto_refresh_enabled = $1, auto_refresh_minutes = $2, updated_at = CURRENT_TIMESTAMP
+WHERE id = $3 AND deleted_at IS NULL
+`
+
+type UpdateUserAutoRefreshParams struct {
+	AutoRefreshEnabled sql.NullBool
+	AutoRefreshMinutes sql.NullInt32
+	ID                 string
+}
+
+func (q *Queries) UpdateUserAutoRefresh(ctx context.Context, arg UpdateUserAutoRefreshParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateUserAutoRefresh, arg.AutoRefreshEnabled, arg.AutoRefreshMinutes, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateUserPassword = `-- name: UpdateUserPassword :execrows

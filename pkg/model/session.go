@@ -26,4 +26,7 @@ type AuthResponse struct {
 	// TranslationEnabled 表示部署侧至少配置了一种翻译引擎。
 	// 与 Desktop 同一思路搭在会话响应上:前端据此决定是否显示翻译按钮。
 	TranslationEnabled bool `json:"translation_enabled"`
+	// AutoRefreshDefaultMinutes 是部署默认的自动刷新间隔,0 表示默认关闭。
+	// 用户没有显式偏好时前端用它推导开关初值。
+	AutoRefreshDefaultMinutes int `json:"auto_refresh_default_minutes"`
 }

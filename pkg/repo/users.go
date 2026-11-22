@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"database/sql"
 	postgresdb "emailbox/db/generated/postgres"
 	sqlitedb "emailbox/db/generated/sqlite"
 	"emailbox/pkg/model"
@@ -17,10 +18,30 @@ func (s *Store) CreateUser(ctx context.Context, u *model.User) error {
 	return normalize(err)
 }
 func mapSQLiteUser(u sqlitedb.User) *model.User {
-	return &model.User{ID: u.ID, Username: u.Username, Email: u.Email, PasswordHash: u.PasswordHash, Status: model.UserStatus(u.Status), PlatformRole: model.PlatformRole(u.PlatformRole), CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt, DeletedAt: timePtr(u.DeletedAt)}
+	var enabled *bool
+	if u.AutoRefreshEnabled.Valid {
+		v := u.AutoRefreshEnabled.Int64 != 0
+		enabled = &v
+	}
+	var minutes *int
+	if u.AutoRefreshMinutes.Valid {
+		v := int(u.AutoRefreshMinutes.Int64)
+		minutes = &v
+	}
+	return &model.User{ID: u.ID, Username: u.Username, Email: u.Email, PasswordHash: u.PasswordHash, Status: model.UserStatus(u.Status), PlatformRole: model.PlatformRole(u.PlatformRole), AutoRefreshEnabled: enabled, AutoRefreshMinutes: minutes, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt, DeletedAt: timePtr(u.DeletedAt)}
 }
 func mapPostgresUser(u postgresdb.User) *model.User {
-	return &model.User{ID: u.ID, Username: u.Username, Email: u.Email, PasswordHash: u.PasswordHash, Status: model.UserStatus(u.Status), PlatformRole: model.PlatformRole(u.PlatformRole), CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt, DeletedAt: timePtr(u.DeletedAt)}
+	var enabled *bool
+	if u.AutoRefreshEnabled.Valid {
+		v := u.AutoRefreshEnabled.Bool
+		enabled = &v
+	}
+	var minutes *int
+	if u.AutoRefreshMinutes.Valid {
+		v := int(u.AutoRefreshMinutes.Int32)
+		minutes = &v
+	}
+	return &model.User{ID: u.ID, Username: u.Username, Email: u.Email, PasswordHash: u.PasswordHash, Status: model.UserStatus(u.Status), PlatformRole: model.PlatformRole(u.PlatformRole), AutoRefreshEnabled: enabled, AutoRefreshMinutes: minutes, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt, DeletedAt: timePtr(u.DeletedAt)}
 }
 func (s *Store) GetUserByID(ctx context.Context, id string) (*model.User, error) {
 	if s.driver == "sqlite" {
@@ -109,6 +130,39 @@ func (s *Store) UpdateUserStatus(ctx context.Context, id string, status model.Us
 		n, e = s.sqlite.UpdateUserStatus(ctx, sqlitedb.UpdateUserStatusParams{Status: string(status), ID: id})
 	} else {
 		n, e = s.postgres.UpdateUserStatus(ctx, postgresdb.UpdateUserStatusParams{Status: string(status), ID: id})
+	}
+	if e != nil {
+		return normalize(e)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateUserAutoRefresh 写入用户的自动刷新偏好。enabled 为 nil 表示「跟随部署默认」,
+// minutes 为 nil 表示用户从未选过间隔——两者都要原样落成 NULL,不能折成 false/0。
+func (s *Store) UpdateUserAutoRefresh(ctx context.Context, id string, enabled *bool, minutes *int) error {
+	var n int64
+	var e error
+	if s.driver == "sqlite" {
+		p := sqlitedb.UpdateUserAutoRefreshParams{ID: id}
+		if enabled != nil {
+			p.AutoRefreshEnabled = sql.NullInt64{Int64: boolToInt64(*enabled), Valid: true}
+		}
+		if minutes != nil {
+			p.AutoRefreshMinutes = sql.NullInt64{Int64: int64(*minutes), Valid: true}
+		}
+		n, e = s.sqlite.UpdateUserAutoRefresh(ctx, p)
+	} else {
+		p := postgresdb.UpdateUserAutoRefreshParams{ID: id}
+		if enabled != nil {
+			p.AutoRefreshEnabled = sql.NullBool{Bool: *enabled, Valid: true}
+		}
+		if minutes != nil {
+			p.AutoRefreshMinutes = sql.NullInt32{Int32: int32(*minutes), Valid: true}
+		}
+		n, e = s.postgres.UpdateUserAutoRefresh(ctx, p)
 	}
 	if e != nil {
 		return normalize(e)

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"emailbox/pkg/crypto"
+	"emailbox/pkg/model"
 
 	"github.com/joho/godotenv"
 )
@@ -34,6 +35,7 @@ type Config struct {
 	OAuth     OAuthConfig       `json:"oauth"`
 	Waffo     WaffoConfig       `json:"waffo"`
 	Translate TranslationConfig `json:"translate"`
+	UI        UIConfig          `json:"ui"`
 }
 type ServerConfig struct {
 	Port        string   `json:"port"`
@@ -54,6 +56,13 @@ type DatabaseConfig struct {
 type SessionConfig struct {
 	ExpireHour   int  `json:"expire_hour"`
 	CookieSecure bool `json:"cookie_secure"`
+}
+
+// UIConfig 是面向界面的部署默认值,不是强制策略:用户可以在右上角覆盖。
+type UIConfig struct {
+	// AutoRefreshMinutes 是收信检查自动刷新的部署默认间隔,0 表示默认关闭。
+	// 开启时最小 5 分钟:一次检查会打全部账号的上游,间隔太短等于持续轮询。
+	AutoRefreshMinutes int `json:"auto_refresh_minutes"`
 }
 
 // 翻译兜底引擎的协议名。两者都是显式配置,不存在「没配也能用」的默认端点。
@@ -218,6 +227,7 @@ func Init() error {
 		// 兼容旧配置名，避免升级后已完成授权的部署丢失回跳地址。
 		returnURL = strings.TrimSpace(getEnv("MICROSOFT_OAUTH_RETURN_URL", "http://localhost:5173/mail/tokens"))
 	}
+	uiCfg := UIConfig{AutoRefreshMinutes: getEnvInt("UI_AUTO_REFRESH_MINUTES", 0)}
 	AppConfig = &Config{AppEnv: getEnv("APP_ENV", "development"), Server: ServerConfig{Port: getEnv("SERVER_PORT", "1323"), Host: getEnv("SERVER_HOST", "0.0.0.0"), CORSOrigins: origins, TrustProxy: trustProxy}, Database: DatabaseConfig{Driver: getEnv("DB_DRIVER", "sqlite"), Host: getEnv("DB_HOST", "localhost"), Port: getEnv("DB_PORT", "5432"), Username: getEnv("DB_USERNAME", "postgres"), Password: getEnv("DB_PASSWORD", ""), DBName: getEnv("DB_NAME", "emailbox"), SSLMode: getEnv("DB_SSLMODE", "disable"), Path: getEnv("DB_PATH", "app.db")}, Session: SessionConfig{ExpireHour: getEnvInt("SESSION_EXPIRE_HOUR", 24), CookieSecure: cookieSecure}, Crypto: CryptoConfig{Key: getEnv("ENCRYPTION_KEY", "")}, SaaS: SaaSConfig{RegistrationMode: getEnv("REGISTRATION_MODE", RegistrationOpen), BootstrapAdminUsername: strings.TrimSpace(getEnv("BOOTSTRAP_ADMIN_USERNAME", "")), BootstrapAdminPassword: getEnv("BOOTSTRAP_ADMIN_PASSWORD", ""), DefaultPlanCode: getEnv("DEFAULT_PLAN_CODE", "free")}, Job: JobConfig{Workers: getEnvInt("JOB_WORKERS", 8), AccountDelayMS: getEnvInt("JOB_ACCOUNT_DELAY_MS", 0), EventRetentionDays: getEnvInt("JOB_EVENT_RETENTION_DAYS", 7), ProviderConcurrency: getEnvInt("JOB_PROVIDER_CONCURRENCY", 2), ProviderRatePerSec: getEnvInt("JOB_PROVIDER_RATE", 2)}, Mailer: MailerConfig{TLSLegacy: tlsLegacy}, OAuth: OAuthConfig{
 		Microsoft: OAuthProviderConfig{Enabled: microsoftOAuthEnabled, ClientID: strings.TrimSpace(getEnv("MICROSOFT_OAUTH_CLIENT_ID", "9e5f94bc-e8a4-4e73-b8be-63364c29d753")), ClientSecret: getEnv("MICROSOFT_OAUTH_CLIENT_SECRET", ""), Tenant: strings.TrimSpace(getEnv("MICROSOFT_OAUTH_TENANT", "common")), RedirectURI: strings.TrimSpace(getEnv("MICROSOFT_OAUTH_REDIRECT_URI", "http://localhost:8080"))},
 		Google:    OAuthProviderConfig{Enabled: googleOAuthEnabled, ClientID: strings.TrimSpace(getEnv("GOOGLE_OAUTH_CLIENT_ID", "")), ClientSecret: getEnv("GOOGLE_OAUTH_CLIENT_SECRET", ""), RedirectURI: strings.TrimSpace(getEnv("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8080"))},
@@ -232,7 +242,7 @@ func Init() error {
 		WebhookProdKey: getEnv("WAFFO_WEBHOOK_PROD_PUBLIC_KEY", ""),
 		// 留空时按请求域名推导，见 BillingService.successURLFor。
 		SuccessURL: strings.TrimSpace(getEnv("WAFFO_SUCCESS_URL", "")),
-	}, Translate: translateCfg}
+	}, Translate: translateCfg, UI: uiCfg}
 	if AppConfig.Database.Driver != "sqlite" && AppConfig.Database.Driver != "postgres" && AppConfig.Database.Driver != "postgresql" {
 		return fmt.Errorf("DB_DRIVER 仅支持 sqlite 或 postgres")
 	}
@@ -250,7 +260,24 @@ func Init() error {
 	if err := validateTranslation(AppConfig); err != nil {
 		return err
 	}
+	if err := validateUI(AppConfig); err != nil {
+		return err
+	}
 	return validateCrypto(AppConfig)
+}
+
+// validateUI 校验界面默认值。0 是「默认关闭」,其余必须是服务层允许的区间。
+// 静默夹到 5 会让部署方以为写下的 2 分钟生效了,实际跑的是另一个值。
+func validateUI(c *Config) error {
+	m := c.UI.AutoRefreshMinutes
+	if m == 0 {
+		return nil
+	}
+	if m < model.MinAutoRefreshMinutes || m > model.MaxAutoRefreshMinutes {
+		return fmt.Errorf("UI_AUTO_REFRESH_MINUTES 只支持 0(关闭)或 %d~%d 分钟",
+			model.MinAutoRefreshMinutes, model.MaxAutoRefreshMinutes)
+	}
+	return nil
 }
 
 // validateWaffo 校验支付配置。

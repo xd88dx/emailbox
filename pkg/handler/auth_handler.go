@@ -30,6 +30,7 @@ func NewAuthHandler(s *service.AuthService, desktop bool) *AuthHandler {
 func (h *AuthHandler) respondAuth(c *echo.Context, v *model.AuthResponse, msg string) error {
 	v.Desktop = h.desktop
 	v.TranslationEnabled = configs.AppConfig.Translate.Enabled()
+	v.AutoRefreshDefaultMinutes = configs.AppConfig.UI.AutoRefreshMinutes
 	return success(c, v, msg)
 }
 

@@ -8,6 +8,10 @@ export interface User {
   // 与租户角色正交：它决定能否跨租户管理整个系统。前端只用它决定是否显示管理入口，
   // 真正的拦截在服务端的 RequirePlatformAdmin —— 改前端 state 什么也拿不到。
   platform_role: "user" | "admin";
+  // null 表示跟随部署默认,false 是用户显式关闭。
+  auto_refresh_enabled: boolean | null;
+  // 用户上次选择的间隔;关闭后仍保留,重新打开时沿用。
+  auto_refresh_minutes: number | null;
 }
 export interface Tenant {
   id: string;
@@ -26,6 +30,8 @@ export interface AuthResponse {
   desktop: boolean;
   // 部署侧是否配置了翻译引擎。没有时详情页不显示翻译按钮。
   translation_enabled: boolean;
+  // 部署默认的自动刷新间隔,0 表示默认关闭。
+  auto_refresh_default_minutes: number;
 }
 // 注册只要用户名和密码。邮箱是登录后可填、也可以一直不填的资料字段。
 export interface RegisterRequest {
@@ -47,6 +53,8 @@ export const userApi = {
   profile: async () => (await client.get<ApiResponse<User>>("/api/v1/user/profile")).data,
   updateProfile: async (data: Partial<Pick<User, "username" | "email">>) =>
     (await client.patch<ApiResponse<User>>("/api/v1/user/profile", data)).data,
+  updateAutoRefresh: async (data: { enabled: boolean; minutes: number }) =>
+    (await client.patch<ApiResponse<User>>("/api/v1/user/auto-refresh", data)).data,
   changePassword: async (data: { old_password: string; new_password: string }) =>
     (await client.post<ApiResponse<null>>("/api/v1/user/change-password", data)).data,
 };

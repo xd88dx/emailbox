@@ -96,6 +96,7 @@ func SetupRoutes(
 	protected.GET("/auth/session", h.Auth.Session)
 	protected.GET("/user/profile", h.User.Get)
 	protected.PATCH("/user/profile", h.User.Update)
+	protected.PATCH("/user/auto-refresh", h.User.UpdateAutoRefresh)
 	protected.POST("/user/change-password", h.User.ChangePassword)
 	protected.GET("/tenants", h.Tenant.List)
 	protected.POST("/tenants", h.Tenant.Create)

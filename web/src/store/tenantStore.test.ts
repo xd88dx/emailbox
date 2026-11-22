@@ -8,6 +8,8 @@ const user = {
   email: "a@example.com",
   status: "active" as const,
   platform_role: "user" as const,
+  auto_refresh_enabled: null,
+  auto_refresh_minutes: null,
 };
 
 function tenant(id: string) {
@@ -15,7 +17,14 @@ function tenant(id: string) {
 }
 
 function auth(tenants: ReturnType<typeof tenant>[], active: string | null): AuthResponse {
-  return { user, tenants, active_tenant_id: active, desktop: false, translation_enabled: false };
+  return {
+    user,
+    tenants,
+    active_tenant_id: active,
+    desktop: false,
+    translation_enabled: false,
+    auto_refresh_default_minutes: 0,
+  };
 }
 
 // hydrate 的三段回退是整个应用里分支最多、也最容易出错的一处：

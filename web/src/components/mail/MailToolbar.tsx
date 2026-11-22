@@ -13,6 +13,7 @@ import {
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import { isTerminal, jobApi } from "@/api/jobs";
 import { mailApi, type TenantRef } from "@/api/mail";
+import { AutoRefreshControl } from "@/components/mail/AutoRefreshControl";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { useJobStore } from "@/store/jobStore";
 import { useSelectionStore } from "@/store/selectionStore";
@@ -31,6 +32,13 @@ interface MailToolbarProps {
   tenantID: TenantRef;
   onReload: () => void;
   onExport: () => void;
+  // 自动检查在跑时手动「刷新/已读」要禁用:服务端同一租户只允许一个收信任务,
+  // 点了也只会收到 409。
+  autoRunning: boolean;
+  // 手动提交成功后把自动计时器从现在重新计时,避免紧接着又跑一轮。
+  onManualCheckStarted: () => void;
+  // 用户刚打开自动刷新:让 hook 立即检查一次。
+  onAutoRefreshEnabled: () => void;
 }
 
 // 用 forwardRef 保持与 Phosphor 图标同一个类型,Kumo 的 icon prop 只接受图标组件。
@@ -43,7 +51,14 @@ const SpinningCircle = forwardRef<SVGSVGElement, IconProps>((props, ref) => (
 ));
 SpinningCircle.displayName = "SpinningCircle";
 
-export function MailToolbar({ tenantID, onReload, onExport }: MailToolbarProps) {
+export function MailToolbar({
+  tenantID,
+  onReload,
+  onExport,
+  autoRunning,
+  onManualCheckStarted,
+  onAutoRefreshEnabled,
+}: MailToolbarProps) {
   // 稳定引用：取回 Set 再 useMemo 成数组。直接在选择器里 Array.from
   // 会让 zustand v5 的快照每次都不同，进而无限重渲染（AGENTS.md §6.3）。
   const selected = useSelectionStore((s) => s.selected);
@@ -73,6 +88,7 @@ export function MailToolbar({ tenantID, onReload, onExport }: MailToolbarProps) 
   const startJob = (id: string, kind: "unread" | "read") => {
     useJobStore.getState().watch(tenantID, id, kind === "unread" ? "unread_check" : "mark_read");
     setOwnJob({ id, kind });
+    onManualCheckStarted();
     onReload();
   };
 
@@ -122,7 +138,8 @@ export function MailToolbar({ tenantID, onReload, onExport }: MailToolbarProps) 
         <Button
           variant="secondary"
           icon={runningUnread ? SpinningCircle : ArrowsClockwise}
-          disabled={pending || active}
+          disabled={pending || active || autoRunning}
+          title={autoRunning ? "自动刷新进行中" : undefined}
           onClick={submitUnread}
         >
           刷新
@@ -145,7 +162,8 @@ export function MailToolbar({ tenantID, onReload, onExport }: MailToolbarProps) 
         <Button
           variant="secondary"
           icon={runningRead ? SpinningCircle : EnvelopeOpen}
-          disabled={pending || (active && !runningRead) || (none && !runningRead)}
+          disabled={pending || autoRunning || (active && !runningRead) || (none && !runningRead)}
+          title={autoRunning ? "自动刷新进行中" : undefined}
           onClick={runningRead ? stopJob : submitMarkRead}
         >
           已读
@@ -193,6 +211,7 @@ export function MailToolbar({ tenantID, onReload, onExport }: MailToolbarProps) 
         </span>
       )}
       {error && <span className="ml-2 shrink-0 text-sm text-kumo-danger">{error}</span>}
+      <AutoRefreshControl running={autoRunning} onEnabled={onAutoRefreshEnabled} />
     </div>
   );
 }

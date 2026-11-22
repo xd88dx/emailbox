@@ -1411,3 +1411,23 @@ PostgreSQL 对照本地仍未跑(本机未起 Docker),交给 CI。
 - 新增测试:`TestStreamFastFirstThenQualityUpgrade`、`TestStreamKeepsFastResultWhenQualityFails`、
   `TestStreamQualityFirstOnly`、`TestStreamBothFail`、`TestStreamCachedFastStillUpgrades`、
   `TestDeepLRotatesKeys`。
+
+### 收信状态自动刷新（2026-11-22）
+
+- 只刷「哪些邮箱有新邮件」，复用已有的收信检查任务（`/mail/jobs/unread-check`）：
+  只读收件箱元数据、不下载正文、不扣 `daily_mail_fetch`。不做整页 reload。
+- 部署默认值 `UI_AUTO_REFRESH_MINUTES`（0 关闭，开启时 5~1440 分钟，非法值启动报错）。
+  用户偏好存 `users.auto_refresh_enabled` / `auto_refresh_minutes`（迁移 000026），
+  两列都可空：NULL 才是「跟随部署默认」，不能拿 0/false 当未设置——否则用户显式
+  关闭之后，管理员改默认值会把他重新打开。间隔与开关分开存，关闭后仍记得上次选的档位。
+- 前端用 `setTimeout` 链而不是 `setInterval`，从上一轮**结束**开始计时；后台标签页不发起
+  新检查，切回可见时按已过时间补一轮；手动刷新成功会重置自动计时。
+- **不要用 `jobStore.watch` 订阅自动任务**：那条 SSE 是全局单例，切任务会关掉旧连接并
+  清空 `byAccount`，会把 Token 页正在看的刷新任务和左栏检查结果一起冲掉。自动任务用
+  `jobApi.get` 轮询状态。
+- 服务端已有租户级互斥（收信检查与批量已读不能同时跑）。自动一轮撞上手动任务返回 409，
+  静默跳过等下一轮；自动任务在跑时工具栏的「刷新/已读」置灰。中途关掉开关时旧一轮可能
+  还在轮询，收尾必须复位 `running`，否则两个按钮会一直禁用（`useAutoRefresh.test` 钉住）。
+- 首次进入页面不立即全量检查，等一个间隔；只有用户**手动打开开关**那一轮立即跑。
+- 测试：`TestAutoRefreshPreferencePersists`（偏好落库、关闭保留间隔、越界拒绝）、
+  `useAutoRefresh` 的 5 条计时/让路/复位用例；tsc / eslint / prettier / vitest 通过。

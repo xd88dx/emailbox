@@ -23,6 +23,8 @@ import { MailToolbar } from "@/components/mail/MailToolbar";
 import { MessageDetail } from "@/components/mail/MessageDetail";
 import { MessageList } from "@/components/mail/MessageList";
 import { refKey } from "@/components/mail/messageRef";
+import { useAutoRefresh } from "@/lib/useAutoRefresh";
+import { useAuthStore } from "@/store/authStore";
 import { useJobStore } from "@/store/jobStore";
 import { useSelectionStore } from "@/store/selectionStore";
 import { useTenantStore } from "@/store/tenantStore";
@@ -111,6 +113,17 @@ export default function MailPage({ scope }: MailPageProps = {}) {
     if (activeAccountID) clearUnread(activeAccountID);
     reloadAccounts();
   }, [activeAccountID, clearUnread, reloadAccounts]);
+
+  // 自动收信检查:用户没显式设置时跟随部署默认(null 不是 false)。
+  // 关闭状态也保留 minutes,重新打开时沿用上次选的间隔。
+  const autoRefreshDefault = useAuthStore((s) => s.autoRefreshDefaultMinutes);
+  const autoRefreshEnabled = useAuthStore((s) => s.user?.auto_refresh_enabled ?? null);
+  const autoRefreshMinutes = useAuthStore((s) => s.user?.auto_refresh_minutes ?? null);
+  const autoEnabled = autoRefreshEnabled ?? autoRefreshDefault > 0;
+  const autoMinutes = autoRefreshMinutes ?? (autoRefreshDefault > 0 ? autoRefreshDefault : 10);
+  // 用户刚从关闭切到开启时递增,让 hook 立即跑一轮而不是等满间隔。
+  const [autoKick, setAutoKick] = useState(0);
+  const autoRefresh = useAutoRefresh(autoEnabled, autoMinutes, tenantID, reloadAccounts, autoKick);
 
   // 分组与统计只在换租户或任务结束/批量操作后重取:它们与筛选条件无关。
   // 之前它们和账号列表串在同一个 Promise.all 里,每切换一次状态都要等
@@ -352,7 +365,14 @@ export default function MailPage({ scope }: MailPageProps = {}) {
   return (
     <MailShell
       toolbar={
-        <MailToolbar tenantID={tenantID} onReload={reload} onExport={() => setExporting(true)} />
+        <MailToolbar
+          tenantID={tenantID}
+          onReload={reload}
+          onExport={() => setExporting(true)}
+          autoRunning={autoRefresh.running}
+          onManualCheckStarted={autoRefresh.resetTimer}
+          onAutoRefreshEnabled={() => setAutoKick((v) => v + 1)}
+        />
       }
       status={<MailStatusBar stats={stats} />}
     >

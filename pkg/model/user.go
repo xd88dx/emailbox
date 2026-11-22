@@ -9,6 +9,13 @@ const (
 	UserStatusDisabled UserStatus = "disabled"
 )
 
+// 收信检查自动刷新的间隔边界。界面只给 5/10/15/30/60 几档,
+// 服务端仍按完整区间校验:请求可以绕过界面直接打过来。
+const (
+	MinAutoRefreshMinutes = 5
+	MaxAutoRefreshMinutes = 1440
+)
+
 type User struct {
 	ID           string     `json:"id"`
 	Username     string     `json:"username"`
@@ -17,20 +24,32 @@ type User struct {
 	Status       UserStatus `json:"status"`
 	// PlatformRole 与租户角色正交：它决定能否跨租户管理整个系统。
 	PlatformRole PlatformRole `json:"platform_role"`
-	CreatedAt    time.Time    `json:"created_at"`
-	UpdatedAt    time.Time    `json:"updated_at"`
-	DeletedAt    *time.Time   `json:"-"`
+	// AutoRefreshEnabled 为 nil 表示跟随部署默认(UI_AUTO_REFRESH_MINUTES);
+	// true/false 是用户显式选择,之后管理员改默认值不会覆盖它。
+	AutoRefreshEnabled *bool `json:"auto_refresh_enabled"`
+	// AutoRefreshMinutes 与开关分开存:用户关闭后仍要记得上次选的间隔,
+	// 否则下次打开会跳回部署默认,用户会以为自己的设置丢了。
+	AutoRefreshMinutes *int       `json:"auto_refresh_minutes"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	DeletedAt          *time.Time `json:"-"`
 }
 type UserResponse struct {
-	ID           string       `json:"id"`
-	Username     string       `json:"username"`
-	Email        string       `json:"email"`
-	Status       UserStatus   `json:"status"`
-	PlatformRole PlatformRole `json:"platform_role"`
+	ID                 string       `json:"id"`
+	Username           string       `json:"username"`
+	Email              string       `json:"email"`
+	Status             UserStatus   `json:"status"`
+	PlatformRole       PlatformRole `json:"platform_role"`
+	AutoRefreshEnabled *bool        `json:"auto_refresh_enabled"`
+	AutoRefreshMinutes *int         `json:"auto_refresh_minutes"`
 }
 
 func (u User) ToResponse() UserResponse {
-	return UserResponse{ID: u.ID, Username: u.Username, Email: u.Email, Status: u.Status, PlatformRole: u.PlatformRole}
+	return UserResponse{
+		ID: u.ID, Username: u.Username, Email: u.Email, Status: u.Status,
+		PlatformRole: u.PlatformRole, AutoRefreshEnabled: u.AutoRefreshEnabled,
+		AutoRefreshMinutes: u.AutoRefreshMinutes,
+	}
 }
 
 // IsPlatformAdmin 表示该用户是否为平台管理员。
@@ -60,4 +79,11 @@ type UpdateProfileRequest struct {
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password"`
 	NewPassword string `json:"new_password"`
+}
+
+// UpdateAutoRefreshRequest 是收信自动刷新的用户偏好。关闭时仍带上分钟数,
+// 让服务端记住用户上次选的间隔。
+type UpdateAutoRefreshRequest struct {
+	Enabled bool `json:"enabled"`
+	Minutes int  `json:"minutes"`
 }

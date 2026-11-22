@@ -292,6 +292,7 @@ type Querier interface {
 	// admin, so a later subscription cancellation will not revert this choice.
 	UpdateTenantPlan(ctx context.Context, arg UpdateTenantPlanParams) (int64, error)
 	UpdateTenantSubscriptionQuota(ctx context.Context, arg UpdateTenantSubscriptionQuotaParams) (int64, error)
+	UpdateUserAutoRefresh(ctx context.Context, arg UpdateUserAutoRefreshParams) (int64, error)
 	UpdateUserLastLogin(ctx context.Context, id string) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (int64, error)
 	UpdateUserPlatformRole(ctx context.Context, arg UpdateUserPlatformRoleParams) (int64, error)

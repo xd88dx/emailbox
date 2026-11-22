@@ -14,3 +14,6 @@ UPDATE users SET platform_role = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $
 SELECT COUNT(*) FROM users WHERE platform_role = 'admin' AND deleted_at IS NULL;
 -- name: UpdateUserStatus :execrows
 UPDATE users SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND deleted_at IS NULL;
+-- name: UpdateUserAutoRefresh :execrows
+UPDATE users SET auto_refresh_enabled = $1, auto_refresh_minutes = $2, updated_at = CURRENT_TIMESTAMP
+WHERE id = $3 AND deleted_at IS NULL;
