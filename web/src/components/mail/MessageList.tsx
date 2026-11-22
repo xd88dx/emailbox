@@ -367,7 +367,10 @@ export function MessageList({
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-kumo-line px-3">
+      {/* 与详情 header 用同一套 items-start + px-4 py-3：两个面板顶部对齐、
+          右边缘在各自激活状态下都贴着容器右边，两个 X 因此落在屏幕同一位置。
+          关闭详情后列表面板展宽，列表 X 正好移到详情 X 原位，鼠标不用动即可连点。 */}
+      <header className="flex shrink-0 items-start gap-2 overflow-x-auto border-b border-kumo-line px-4 py-3">
         <Button
           className="md:hidden"
           shape="square"
