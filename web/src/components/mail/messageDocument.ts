@@ -153,7 +153,11 @@ function sanitizeStyleSheet(css: string): string {
   }
   // 二次校验：还有残留（含试图闭合 <style> 逃进文档流的 HTML 标签）就整块丢弃，
   // 绝不带着可疑内容进文档。
-  if (/<\/?[a-z]|\b(?:url|image-set|expression)\s*\(|[-a-z]*binding\s*:|behavior\s*:|@import|@charset|@namespace/i.test(out)) {
+  if (
+    /<\/?[a-z]|\b(?:url|image-set|expression)\s*\(|[-a-z]*binding\s*:|behavior\s*:|@import|@charset|@namespace/i.test(
+      out,
+    )
+  ) {
     return "";
   }
   return out.trim();

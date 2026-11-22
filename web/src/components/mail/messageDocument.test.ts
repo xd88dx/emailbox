@@ -127,7 +127,7 @@ describe("buildDocument · 邮件自带样式", () => {
 
   it("抽掉 url() / expression() / behavior 等外链与执行向量", () => {
     const { html } = buildDocument(
-      '<style>.a{background:url(https://tracker.example/p.png)}' +
+      "<style>.a{background:url(https://tracker.example/p.png)}" +
         ".b{width:expression(alert(1))}.c{behavior:url(x.htc)}.d{color:blue}</style>" +
         '<p class="a d">x</p>',
       "html",
@@ -143,7 +143,7 @@ describe("buildDocument · 邮件自带样式", () => {
 
   it("含试图逃出 style 块的 HTML 标签时整块丢弃", () => {
     const { html } = buildDocument(
-      '<style>.a{color:red}</style><style></style><script>alert(1)</script><p>x</p>',
+      "<style>.a{color:red}</style><style></style><script>alert(1)</script><p>x</p>",
       "html",
       false,
     );
