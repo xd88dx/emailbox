@@ -82,84 +82,88 @@ export function AccountList({
   }
 
   return (
-    // @container + overflow-hidden：前者让列数跟着这一栏自己的宽度走，
-    // 后者是兜底——任何列宽算错都只会在本栏内被裁掉，不会再画到相邻面板上。
-    <div className="@container flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div
-        className={`${GRID} shrink-0 border-b border-kumo-line px-2 py-2 text-xs text-kumo-subtle`}
-      >
-        <Checkbox
-          checked={allOnPageSelected}
-          onCheckedChange={() => (allOnPageSelected ? clearPage(pageIDs) : selectPage(pageIDs))}
-          aria-label="全选当前页"
-        />
-        <span className="font-medium">邮箱</span>
-        <span className={`${SECONDARY_CELL} font-medium`}>服务商</span>
-        <span className="font-medium">状态</span>
-        <span className="font-medium">令牌</span>
-        <span className="sr-only">操作</span>
-      </div>
+    // @container 让列数跟着这一栏自己的可见宽度走。横向滚动放在这一层：
+    // 紧凑视口下内层撑出最小宽度，表头 / 虚拟列表 / 分页三者一起左右滚，
+    // 分页不再单独滚（否则会出现两条横向滚动条）。overflow-y-hidden 把纵向
+    // 滚动留给 VirtualList，避免这里再套出一条竖滚动条。
+    <div className="@container flex min-h-0 flex-1 flex-col overflow-x-auto overflow-y-hidden">
+      <div className="flex min-h-0 min-w-[40rem] flex-1 flex-col md:min-w-0">
+        <div
+          className={`${GRID} shrink-0 border-b border-kumo-line px-2 py-2 text-xs text-kumo-subtle`}
+        >
+          <Checkbox
+            checked={allOnPageSelected}
+            onCheckedChange={() => (allOnPageSelected ? clearPage(pageIDs) : selectPage(pageIDs))}
+            aria-label="全选当前页"
+          />
+          <span className="font-medium">邮箱</span>
+          <span className={`${SECONDARY_CELL} font-medium`}>服务商</span>
+          <span className="font-medium">状态</span>
+          <span className="font-medium">令牌</span>
+          <span className="sr-only">操作</span>
+        </div>
 
-      {accounts.length === 0 ? (
-        <EmptyState
-          icon={Tray}
-          title="暂无符合条件的邮箱账号"
-          description="点击工具栏中的「导入」添加账号凭据，或调整当前筛选条件。"
-        />
-      ) : (
-        <VirtualList
-          items={accounts}
-          rowHeight={ROW_HEIGHT}
-          className="min-h-0 flex-1"
-          renderRow={(account) => (
-            <AccountRow
-              account={account}
-              active={account.id === activeID}
-              onSelect={onSelect}
-              onEdit={onEdit}
-              check={checkResults?.[account.id]}
-              unreadFromCheck={unreadFromCheck}
-            />
-          )}
-        />
-      )}
+        {accounts.length === 0 ? (
+          <EmptyState
+            icon={Tray}
+            title="暂无符合条件的邮箱账号"
+            description="点击工具栏中的「导入」添加账号凭据，或调整当前筛选条件。"
+          />
+        ) : (
+          <VirtualList
+            items={accounts}
+            rowHeight={ROW_HEIGHT}
+            className="min-h-0 flex-1"
+            renderRow={(account) => (
+              <AccountRow
+                account={account}
+                active={account.id === activeID}
+                onSelect={onSelect}
+                onEdit={onEdit}
+                check={checkResults?.[account.id]}
+                unreadFromCheck={unreadFromCheck}
+              />
+            )}
+          />
+        )}
 
-      {/* 分页常驻（只要有账号就显示）。后端每页最多 200 条，
+        {/* 分页常驻（只要有账号就显示）。后端每页最多 200 条，
           没有这一条的时候，第 51 个账号往后在界面上根本不存在。
 
           只借用 Kumo 的 Controls（纯图标翻页按钮），信息和每页条数自己写：
           Pagination.Info / PageSize 的文案是写死的英文（"Showing 1-50 of 50"、"Per page"），
           放进一个全中文的界面里很突兀，而 Kumo 没给它们留文案接口。 */}
-      {total > 0 && (
-        <div className="flex shrink-0 items-center gap-3 overflow-x-auto border-t border-kumo-line px-3 py-2">
-          <Pagination page={page} setPage={onPageChange} perPage={perPage} totalCount={total}>
-            {/* 信息文本按容器宽度分两档。这一栏被左右夹着，四栏都展开时只有 400 多像素，
+        {total > 0 && (
+          <div className="flex shrink-0 items-center gap-3 border-t border-kumo-line px-3 py-2">
+            <Pagination page={page} setPage={onPageChange} perPage={perPage} totalCount={total}>
+              {/* 信息文本按容器宽度分两档。这一栏被左右夹着，四栏都展开时只有 400 多像素，
                 完整的「第 1–50 条，共 200 条」会把整条分页挤到换行。
                 窄的时候总数比区间重要——用户先想知道一共多少个。 */}
-            <span className="shrink-0 whitespace-nowrap text-xs text-kumo-subtle tabular-nums @2xl:hidden">
-              共 {total} 条
-            </span>
-            <span className="hidden shrink-0 whitespace-nowrap text-xs text-kumo-subtle tabular-nums @2xl:inline">
-              第 {(page - 1) * perPage + 1}–{Math.min(page * perPage, total)} 条，共 {total} 条
-            </span>
-            <Pagination.Separator />
-            <label className="flex shrink-0 items-center gap-1.5 text-xs text-kumo-subtle">
-              <span className="hidden whitespace-nowrap @2xl:inline">每页</span>
-              {/* 选项上限跟后端的 MaxAccountPageSize(200) 对齐：给出更大的值也会被后端截断，
+              <span className="shrink-0 whitespace-nowrap text-xs text-kumo-subtle tabular-nums @2xl:hidden">
+                共 {total} 条
+              </span>
+              <span className="hidden shrink-0 whitespace-nowrap text-xs text-kumo-subtle tabular-nums @2xl:inline">
+                第 {(page - 1) * perPage + 1}–{Math.min(page * perPage, total)} 条，共 {total} 条
+              </span>
+              <Pagination.Separator />
+              <label className="flex shrink-0 items-center gap-1.5 text-xs text-kumo-subtle">
+                <span className="hidden whitespace-nowrap @2xl:inline">每页</span>
+                {/* 选项上限跟后端的 MaxAccountPageSize(200) 对齐：给出更大的值也会被后端截断，
                   界面上却写着「每页 500」，看起来像是丢了数据。 */}
-              <Select
-                size="sm"
-                className="w-18"
-                aria-label="每页条数"
-                items={PAGE_SIZES.map((n) => ({ label: String(n), value: String(n) }))}
-                value={String(perPage)}
-                onValueChange={(value: string | null) => onPerPageChange(Number(value) || 50)}
-              />
-            </label>
-            <Pagination.Controls />
-          </Pagination>
-        </div>
-      )}
+                <Select
+                  size="sm"
+                  className="w-18"
+                  aria-label="每页条数"
+                  items={PAGE_SIZES.map((n) => ({ label: String(n), value: String(n) }))}
+                  value={String(perPage)}
+                  onValueChange={(value: string | null) => onPerPageChange(Number(value) || 50)}
+                />
+              </label>
+              <Pagination.Controls />
+            </Pagination>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
