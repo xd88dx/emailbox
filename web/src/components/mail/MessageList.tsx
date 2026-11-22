@@ -403,7 +403,7 @@ export function MessageList({
         />
       </header>
 
-      <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-kumo-line px-3 py-1.5">
+      <div className="flex h-(--ebx-subhead-h) shrink-0 items-center gap-2 overflow-x-auto border-b border-kumo-line px-3">
         <Checkbox
           checked={allVisibleSelected}
           indeterminate={selectedVisible > 0 && !allVisibleSelected}

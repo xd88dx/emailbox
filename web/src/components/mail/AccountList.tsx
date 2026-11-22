@@ -89,7 +89,7 @@ export function AccountList({
     <div className="@container flex min-h-0 flex-1 flex-col overflow-x-auto overflow-y-hidden">
       <div className="flex min-h-0 min-w-[40rem] flex-1 flex-col md:min-w-0">
         <div
-          className={`${GRID} shrink-0 border-b border-kumo-line px-2 py-2 text-xs text-kumo-subtle`}
+          className={`${GRID} h-(--ebx-subhead-h) shrink-0 border-b border-kumo-line px-2 text-xs text-kumo-subtle`}
         >
           <Checkbox
             checked={allOnPageSelected}
