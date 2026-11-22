@@ -16,6 +16,8 @@ const delay = (ms: number) => new Promise<void>((resolve) => window.setTimeout(r
 // 它刻意不走 jobStore.watch:那条流是全局单例,watch 新任务会关掉旧 SSE
 // 并清空 byAccount,把 Token 页正在看的刷新任务和左栏的检查快照一起冲掉。
 // 自动刷新是后台行为,轮询任务状态就够了。
+// 标签页在后台时也照常提交检查:浏览器会对后台 setTimeout 节流(通常不低于 1 分钟),
+// 5 分钟及以上的间隔仍能触发,只是不保证严格准点;页面被彻底冻结则无法执行。
 export function useAutoRefresh(
   enabled: boolean,
   minutes: number,
@@ -44,8 +46,6 @@ export function useAutoRefresh(
     let disposed = false;
     let inFlight = false;
     let timer: number | null = null;
-    // 从上一轮结束开始算间隔。任务跑得比间隔还长时,不会出现「刚结束就立刻再来一次」。
-    let lastFinished = Date.now();
 
     const clearTimer = () => {
       if (timer !== null) {
@@ -61,12 +61,6 @@ export function useAutoRefresh(
 
     async function run() {
       if (disposed || inFlight) return;
-      // 后台标签页不发起新的全量检查;切回可见时由 visibilitychange 立即补一轮。
-      if (document.visibilityState === "hidden") {
-        schedule(intervalMs);
-        return;
-      }
-
       inFlight = true;
       setRunning(true);
       try {
@@ -89,22 +83,12 @@ export function useAutoRefresh(
         // 即使 disposed 也要收掉 running:否则用户在中途关掉开关后,
         // 工具栏的「刷新/已读」会一直因为 autoRunning 被禁用。
         setRunning(false);
-        if (!disposed) {
-          lastFinished = Date.now();
-          schedule(intervalMs);
-        }
+        if (!disposed) schedule(intervalMs);
       }
     }
 
-    const onVisibility = () => {
-      if (document.visibilityState !== "visible" || inFlight) return;
-      const elapsed = Date.now() - lastFinished;
-      schedule(elapsed >= intervalMs ? 0 : intervalMs - elapsed);
-    };
-
     // 手动刷新已经拿到最新状态,把计时器从现在重新开始,避免紧接着又跑一轮。
     resetRef.current = () => {
-      lastFinished = Date.now();
       schedule(intervalMs);
     };
 
@@ -112,12 +96,10 @@ export function useAutoRefresh(
     const immediate = kick !== lastKickRef.current;
     lastKickRef.current = kick;
     schedule(immediate ? 0 : intervalMs);
-    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       disposed = true;
       clearTimer();
       resetRef.current = () => {};
-      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [intervalMs, tenantKey, kick]);
 

@@ -74,6 +74,26 @@ describe("useAutoRefresh", () => {
     expect(result.current.running).toBe(false);
   });
 
+  it("标签页在后台(hidden)时仍按间隔提交检查", async () => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "hidden",
+    });
+    try {
+      const onDone = vi.fn();
+      renderHook(() => useAutoRefresh(true, 5, "t1", onDone));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5 * 60_000 + 3_000);
+      });
+
+      expect(mocks.submitUnreadCheck).toHaveBeenCalledTimes(1);
+      expect(onDone).toHaveBeenCalledTimes(1);
+    } finally {
+      delete (document as { visibilityState?: string }).visibilityState;
+    }
+  });
+
   // 中途关掉开关时旧的一轮还在轮询,收尾必须复位 running,
   // 否则工具栏的「刷新/已读」会一直因为 autoRunning 被禁用。
   it("运行途中关闭开关后不会卡在运行态", async () => {
