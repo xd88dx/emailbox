@@ -18,7 +18,7 @@ func TestValidateUI(t *testing.T) {
 	for _, c := range cases {
 		err := validateUI(&Config{UI: UIConfig{AutoRefreshMinutes: c.minutes}})
 		if (err != nil) != c.wantErr {
-			t.Errorf("UI_AUTO_REFRESH_MINUTES=%d: err=%v, wantErr=%v", c.minutes, err, c.wantErr)
+			t.Errorf("AUTO_REFRESH_MIN=%d: err=%v, wantErr=%v", c.minutes, err, c.wantErr)
 		}
 	}
 }

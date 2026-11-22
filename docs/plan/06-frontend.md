@@ -303,7 +303,7 @@ VirtualList.tsx      EmptyState.tsx
 改单个账号的配置走 `AccountDrawer`（列表行右侧那支笔）。
 
 工具栏右侧是**自动收信检查**（`AutoRefreshControl`：开关 + 间隔下拉）：默认值来自
-部署的 `UI_AUTO_REFRESH_MINUTES`，用户改过之后以账号里存的偏好为准。开启时前端按间隔
+部署的 `AUTO_REFRESH_MIN`，用户改过之后以账号里存的偏好为准。开启时前端按间隔
 提交已有的「收信检查」任务（`scope: "all"`，只读元数据、不扣取件额度），用
 `jobApi.get` 轮询而不是 `jobStore.watch`——后者是 Token 页 SSE 与账号列表共用的一条流，
 抢过来会把那边切断。自动一轮在跑时「刷新/已读」置灰，手动刷新成功则重置自动计时；

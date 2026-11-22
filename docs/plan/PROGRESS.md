@@ -1416,7 +1416,7 @@ PostgreSQL 对照本地仍未跑(本机未起 Docker),交给 CI。
 
 - 只刷「哪些邮箱有新邮件」，复用已有的收信检查任务（`/mail/jobs/unread-check`）：
   只读收件箱元数据、不下载正文、不扣 `daily_mail_fetch`。不做整页 reload。
-- 部署默认值 `UI_AUTO_REFRESH_MINUTES`（0 关闭，开启时 5~1440 分钟，非法值启动报错）。
+- 部署默认值 `AUTO_REFRESH_MIN`（0 关闭，开启时 5~1440 分钟，非法值启动报错）。
   用户偏好存 `users.auto_refresh_enabled` / `auto_refresh_minutes`（迁移 000026），
   两列都可空：NULL 才是「跟随部署默认」，不能拿 0/false 当未设置——否则用户显式
   关闭之后，管理员改默认值会把他重新打开。间隔与开关分开存，关闭后仍记得上次选的档位。

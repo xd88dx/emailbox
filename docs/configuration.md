@@ -197,7 +197,7 @@ JOB_PROVIDER_RATE=2
 
 ```env
 # 邮箱页自动收信检查的默认间隔(分钟),0 关闭;开启时最小 5、最大 1440
-UI_AUTO_REFRESH_MINUTES=0
+AUTO_REFRESH_MIN=0
 ```
 
 这是**部署默认值,不是强制策略**:用户在邮箱页右上角可以自行开关并选择

@@ -24,7 +24,7 @@ type User struct {
 	Status       UserStatus `json:"status"`
 	// PlatformRole 与租户角色正交：它决定能否跨租户管理整个系统。
 	PlatformRole PlatformRole `json:"platform_role"`
-	// AutoRefreshEnabled 为 nil 表示跟随部署默认(UI_AUTO_REFRESH_MINUTES);
+	// AutoRefreshEnabled 为 nil 表示跟随部署默认(AUTO_REFRESH_MIN);
 	// true/false 是用户显式选择,之后管理员改默认值不会覆盖它。
 	AutoRefreshEnabled *bool `json:"auto_refresh_enabled"`
 	// AutoRefreshMinutes 与开关分开存:用户关闭后仍要记得上次选的间隔,

@@ -227,7 +227,7 @@ func Init() error {
 		// 兼容旧配置名，避免升级后已完成授权的部署丢失回跳地址。
 		returnURL = strings.TrimSpace(getEnv("MICROSOFT_OAUTH_RETURN_URL", "http://localhost:5173/mail/tokens"))
 	}
-	uiCfg := UIConfig{AutoRefreshMinutes: getEnvInt("UI_AUTO_REFRESH_MINUTES", 0)}
+	uiCfg := UIConfig{AutoRefreshMinutes: getEnvInt("AUTO_REFRESH_MIN", 0)}
 	AppConfig = &Config{AppEnv: getEnv("APP_ENV", "development"), Server: ServerConfig{Port: getEnv("SERVER_PORT", "1323"), Host: getEnv("SERVER_HOST", "0.0.0.0"), CORSOrigins: origins, TrustProxy: trustProxy}, Database: DatabaseConfig{Driver: getEnv("DB_DRIVER", "sqlite"), Host: getEnv("DB_HOST", "localhost"), Port: getEnv("DB_PORT", "5432"), Username: getEnv("DB_USERNAME", "postgres"), Password: getEnv("DB_PASSWORD", ""), DBName: getEnv("DB_NAME", "emailbox"), SSLMode: getEnv("DB_SSLMODE", "disable"), Path: getEnv("DB_PATH", "app.db")}, Session: SessionConfig{ExpireHour: getEnvInt("SESSION_EXPIRE_HOUR", 24), CookieSecure: cookieSecure}, Crypto: CryptoConfig{Key: getEnv("ENCRYPTION_KEY", "")}, SaaS: SaaSConfig{RegistrationMode: getEnv("REGISTRATION_MODE", RegistrationOpen), BootstrapAdminUsername: strings.TrimSpace(getEnv("BOOTSTRAP_ADMIN_USERNAME", "")), BootstrapAdminPassword: getEnv("BOOTSTRAP_ADMIN_PASSWORD", ""), DefaultPlanCode: getEnv("DEFAULT_PLAN_CODE", "free")}, Job: JobConfig{Workers: getEnvInt("JOB_WORKERS", 8), AccountDelayMS: getEnvInt("JOB_ACCOUNT_DELAY_MS", 0), EventRetentionDays: getEnvInt("JOB_EVENT_RETENTION_DAYS", 7), ProviderConcurrency: getEnvInt("JOB_PROVIDER_CONCURRENCY", 2), ProviderRatePerSec: getEnvInt("JOB_PROVIDER_RATE", 2)}, Mailer: MailerConfig{TLSLegacy: tlsLegacy}, OAuth: OAuthConfig{
 		Microsoft: OAuthProviderConfig{Enabled: microsoftOAuthEnabled, ClientID: strings.TrimSpace(getEnv("MICROSOFT_OAUTH_CLIENT_ID", "9e5f94bc-e8a4-4e73-b8be-63364c29d753")), ClientSecret: getEnv("MICROSOFT_OAUTH_CLIENT_SECRET", ""), Tenant: strings.TrimSpace(getEnv("MICROSOFT_OAUTH_TENANT", "common")), RedirectURI: strings.TrimSpace(getEnv("MICROSOFT_OAUTH_REDIRECT_URI", "http://localhost:8080"))},
 		Google:    OAuthProviderConfig{Enabled: googleOAuthEnabled, ClientID: strings.TrimSpace(getEnv("GOOGLE_OAUTH_CLIENT_ID", "")), ClientSecret: getEnv("GOOGLE_OAUTH_CLIENT_SECRET", ""), RedirectURI: strings.TrimSpace(getEnv("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8080"))},
@@ -274,7 +274,7 @@ func validateUI(c *Config) error {
 		return nil
 	}
 	if m < model.MinAutoRefreshMinutes || m > model.MaxAutoRefreshMinutes {
-		return fmt.Errorf("UI_AUTO_REFRESH_MINUTES 只支持 0(关闭)或 %d~%d 分钟",
+		return fmt.Errorf("AUTO_REFRESH_MIN 只支持 0(关闭)或 %d~%d 分钟",
 			model.MinAutoRefreshMinutes, model.MaxAutoRefreshMinutes)
 	}
 	return nil
