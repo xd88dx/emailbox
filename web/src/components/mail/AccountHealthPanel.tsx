@@ -123,10 +123,10 @@ export function AccountHealthPanel({
           复核失效账号{invalid ? `（${invalid}）` : ""}
         </Button>
         {groups.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="mx-1 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mx-1 hidden h-5 w-px shrink-0 bg-kumo-line sm:block" aria-hidden />
             <Select
-              className="w-44"
+              className="w-44 max-w-full"
               aria-label="要检测的分组"
               placeholder="选择分组…"
               multiple

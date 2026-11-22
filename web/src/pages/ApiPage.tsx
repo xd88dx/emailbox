@@ -171,7 +171,7 @@ export default function ApiPage() {
           <h2 className="text-lg font-medium">接口</h2>
           <p className="mt-1 text-xs text-kumo-subtle">
             路径前缀{" "}
-            <code className="font-mono">
+            <code className="break-all font-mono">
               {base}/api/v1/tenants/{tenantID || "{tenantID}"}
             </code>
           </p>

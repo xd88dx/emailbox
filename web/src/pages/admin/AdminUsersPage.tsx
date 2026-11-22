@@ -67,7 +67,7 @@ export default function AdminUsersPage() {
     <PageShell title="用户" description={`共 ${total} 位注册用户。`}>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Input
-          className="max-w-xs"
+          className="w-48"
           placeholder="搜索用户名或邮箱"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -75,7 +75,7 @@ export default function AdminUsersPage() {
         {/* 用 items 而不是 <Select.Option> 子元素：后者在 value="" 时选不中，
             下拉框会显示成一片空白，看起来像坏了。 */}
         <Select
-          className="w-36"
+          className="w-48"
           size="sm"
           aria-label="按状态筛选"
           items={[
@@ -111,7 +111,7 @@ export default function AdminUsersPage() {
 
       <LayerCard className="overflow-x-auto">
         <div
-          className={`grid ${COLUMNS} gap-3 border-b border-kumo-line bg-kumo-canvas px-4 py-3 text-xs font-medium text-kumo-subtle`}
+          className={`grid ${COLUMNS} gap-3 border-b border-kumo-line bg-kumo-fill px-4 py-3 text-xs font-medium text-kumo-strong`}
         >
           <span>用户</span>
           <span>邮箱 / 上限</span>

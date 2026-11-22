@@ -149,10 +149,10 @@ export default function TokensPage({ scope }: TokensPageProps = {}) {
             选择器和按钮绑在一起，选完仍需明确点一下才提交：下拉一变就发任务，
             误触的代价是几千次上游调用。 */}
         {groups.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="mx-1 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mx-1 hidden h-5 w-px shrink-0 bg-kumo-line sm:block" aria-hidden />
             <Select
-              className="w-44"
+              className="w-44 max-w-full"
               aria-label="要刷新的分组"
               placeholder="选择分组…"
               multiple

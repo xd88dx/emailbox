@@ -51,12 +51,14 @@ export const Layout = () => {
             className={
               shell
                 ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-                : "min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden"
+                : "min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto"
             }
           >
             <Outlet />
           </main>
-          <Footer compact />
+          {/* 工作台（shell）页面的客服行并入底部状态条 MailStatusBar，
+              这里不再单独渲染，否则底部会多出一行客服。其余应用页保留。 */}
+          {!shell && <Footer compact />}
         </div>
       </div>
     );

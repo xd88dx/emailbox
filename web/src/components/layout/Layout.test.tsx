@@ -47,9 +47,9 @@ describe("Layout 的三种形态", () => {
     expect(screen.getByText("隐私政策")).toBeTruthy();
     expect(
       within(screen.getByRole("contentinfo"))
-        .getByRole("link", { name: "contact@mail.corouter.cc" })
+        .getByRole("link", { name: "abc@example.com" })
         .getAttribute("href"),
-    ).toBe("mailto:contact@mail.corouter.cc");
+    ).toBe("mailto:abc@example.com");
     // 访客身上没有导航栏，登录入口必须摆在顶上。
     expect(screen.getByRole("link", { name: "登录" })).toBeTruthy();
     expect(screen.queryByRole("navigation", { name: "主导航" })).toBeNull();
@@ -69,30 +69,27 @@ describe("Layout 的三种形态", () => {
     expect(screen.queryByRole("link", { name: "注册" })).toBeNull();
     const main = container.querySelector("main")!;
     const footer = screen.getByRole("contentinfo");
-    expect(
-      within(footer).getByRole("link", { name: "contact@mail.corouter.cc" }).getAttribute("href"),
-    ).toBe("mailto:contact@mail.corouter.cc");
+    expect(within(footer).getByRole("link", { name: "abc@example.com" }).getAttribute("href")).toBe(
+      "mailto:abc@example.com",
+    );
     expect(main.nextElementSibling).toBe(footer);
     expect(main.className).toContain("overflow-y-auto");
     expect(main.className).toContain("min-h-0");
     expect(footer.className).toContain("shrink-0");
   });
 
-  it("工作台页在应用页基础上再关掉内容区自身的滚动", () => {
+  it("工作台页关掉内容区自身的滚动，且不再单独渲染客服页脚", () => {
     const { container } = renderAt("/mail");
 
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeTruthy();
     // /mail 的滚动由它内部各面板分别负责，内容区自己一滚，
     // 工具条和状态栏就会跟着跑出视口。
     const main = container.querySelector("main")!;
-    const footer = screen.getByRole("contentinfo");
-    expect(
-      within(footer).getByRole("link", { name: "contact@mail.corouter.cc" }).getAttribute("href"),
-    ).toBe("mailto:contact@mail.corouter.cc");
-    expect(main.nextElementSibling).toBe(footer);
     expect(main.className).not.toContain("overflow-y-auto");
     expect(main.className).toContain("overflow-hidden");
     expect(main.className).toContain("min-h-0");
+    // 客服行已并入 MailStatusBar，这里不再有独立 footer，避免底部出现两行客服。
+    expect(screen.queryByRole("contentinfo")).toBeNull();
   });
 });
 

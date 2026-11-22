@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RefreshStats } from "@/api/jobs";
+import { SUPPORT_EMAIL } from "@/lib/support";
 import { StatusDot } from "./StatusDot";
 
 // 底部常驻状态条。纯展示，数据由 MailPage 取（和左栏计数是同一份，
@@ -19,16 +20,30 @@ interface MailStatusBarProps {
 
 export function MailStatusBar({ stats }: MailStatusBarProps) {
   return (
-    <div className="flex h-(--ebx-status-h) shrink-0 items-center gap-4 overflow-x-auto border-t border-kumo-line bg-kumo-canvas px-4 text-xs text-kumo-subtle">
-      <span className="shrink-0 tabular-nums">{stats?.total ?? 0} 托管账号</span>
-      <Stat tone="online" label="凭据正常" value={stats?.success} />
-      <Stat tone="error" label="授权失效" value={stats?.failed} />
-      <Stat tone="idle" label="未检测" value={stats?.never} />
+    <div className="flex shrink-0 flex-col items-center gap-1 border-t border-kumo-line bg-kumo-canvas px-4 py-2 text-xs text-kumo-subtle">
+      {/* 三行各自居中：账号统计 / 服务状态 / 客服。窄屏下统计行可换行，
+          不再用 h-(--ebx-status-h) 锁高，否则放不下三行。 */}
+      <div className="flex max-w-full flex-wrap items-center justify-center gap-x-4 gap-y-1">
+        <span className="shrink-0 tabular-nums">{stats?.total ?? 0} 托管账号</span>
+        <Stat tone="online" label="凭据正常" value={stats?.success} />
+        <Stat tone="error" label="授权失效" value={stats?.failed} />
+        <Stat tone="idle" label="未检测" value={stats?.never} />
+      </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-4">
+      <div className="flex shrink-0 items-center gap-4">
         <span>服务就绪</span>
         <Clock />
       </div>
+
+      <p className="flex min-w-0 flex-wrap items-center justify-center gap-x-1">
+        <span>客服：</span>
+        <a
+          className="break-all rounded-sm text-kumo-link hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-kumo-focus"
+          href={`mailto:${SUPPORT_EMAIL}`}
+        >
+          {SUPPORT_EMAIL}
+        </a>
+      </p>
     </div>
   );
 }

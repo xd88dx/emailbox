@@ -1,1 +1,1 @@
-export const SUPPORT_EMAIL = "contact@mail.corouter.cc";
+export const SUPPORT_EMAIL = "abc@example.com";

@@ -106,7 +106,7 @@ export function AccountFilterBar({
               <Button
                 variant="secondary"
                 size="sm"
-                className="w-32 shrink-0"
+                className="w-36 shrink-0"
                 aria-label="按状态筛选"
               >
                 <span className="flex w-full items-center justify-between gap-2">

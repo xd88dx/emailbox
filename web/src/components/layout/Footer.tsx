@@ -21,7 +21,7 @@ export function Footer({ compact = false }: { compact?: boolean }) {
   if (compact) {
     return (
       <footer className="shrink-0 border-t border-kumo-line bg-kumo-base">
-        <div className="mx-auto w-full max-w-7xl px-3 py-2 text-xs text-kumo-subtle sm:px-6 lg:px-8">
+        <div className="mx-auto flex w-full max-w-7xl justify-center px-3 py-2 text-xs text-kumo-subtle sm:px-6 lg:px-8">
           {contact}
         </div>
       </footer>
