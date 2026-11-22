@@ -36,9 +36,12 @@ export function MessageBody({ body, bodyType }: MessageBodyProps) {
         // key 让切换图片开关时重建 iframe，而不是复用一个已经加载过远程资源的。
         key={String(showRemoteImages)}
         title="邮件正文"
-        // sandbox 留空 = 拒绝一切：不允许脚本、表单、弹窗，
-        // 也不给 same-origin（否则 iframe 能读到父页面的 DOM 与存储）。
-        sandbox=""
+        // 按设计文档 06-frontend.md：允许链接在新标签打开
+        // （allow-popups + allow-popups-to-escape-sandbox 让新标签脱离沙箱，正常显示）。
+        // 依然不给 allow-scripts / allow-same-origin：脚本仍跑不起来，
+        // iframe 也读不到父页面的 DOM 与存储。链接本身在 messageDocument.ts
+        // 里已被加上 target=_blank + rel=noopener。
+        sandbox="allow-popups allow-popups-to-escape-sandbox"
         srcDoc={html}
         className="min-h-96 w-full flex-1 border-0 bg-white"
       />

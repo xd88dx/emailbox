@@ -45,6 +45,13 @@ export function buildDocument(
     return { html: wrap(escapeHTML(body), true), hadRemoteImages: false };
   }
 
+  // 邮件自带 <style> 会被 DOMPurify 丢掉：它属于 FORBID_CONTENTS（内容被丢弃），
+  // 且以 <style> 开头的字符串会被 HTML 解析器放进 head，默认不序列化。
+  // 但 GitHub 这类通知邮件的排版几乎全靠 <style> 里的 CSS 类，直接丢掉就全乱了。
+  // 做法：净化前抽出 style，逐条验过「没有外链、没有执行向量」后单独保留，
+  // 正文仍走 DOMPurify 完整清洗，两者最后拼进同一个文档。
+  const { body: strippedBody, styles } = extractStyles(body);
+
   let hadRemoteImages = false;
   const purify = DOMPurify();
 
@@ -84,7 +91,7 @@ export function buildDocument(
     node.setAttribute("rel", "noopener noreferrer nofollow");
   });
 
-  const clean = purify.sanitize(body, {
+  const clean = purify.sanitize(strippedBody, {
     // 前八个 DOMPurify 默认就会去掉，写出来是为了让意图可读，
     // 也防止将来有人放宽配置时不小心把它们放回来。
     //
@@ -111,7 +118,45 @@ export function buildDocument(
     ALLOWED_URI_REGEXP: ALLOWED_URI,
   });
 
-  return { html: wrap(clean, false), hadRemoteImages };
+  return { html: wrap(clean, false, styles), hadRemoteImages };
+}
+
+// extractStyles 把正文里的 <style> 块抽出来，只保留「纯排版」的规则。
+// 邮件里的 <style> 是头号 CSS 攻击面：@import 外链样式、url() 外链图片（追踪）、
+// expression()/behavior（旧 IE 执行脚本）、@font-face 外链字体都能藏在里面。
+// 这些一律不保留，只放行选择器 + 安全声明（颜色/间距/字体/布局等），
+// 剩余风险再由 CSP default-src 'none' 兜底。
+function extractStyles(html: string): { body: string; styles: string } {
+  const blocks: string[] = [];
+  const body = html.replace(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi, (_m, css: string) => {
+    const safe = sanitizeStyleSheet(css);
+    if (safe) blocks.push(safe);
+    return "";
+  });
+  return { body, styles: blocks.join("\n") };
+}
+
+// 只保留形如 "@media ... { ... }" 或 "selector { decls }" 的结构，
+// 每条声明的值再过一遍危险模式。宁可少保留样式，也不放进可执行/外链内容。
+function sanitizeStyleSheet(css: string): string {
+  // 先去掉注释，避免注释里藏 payload 干扰后续匹配。
+  let out = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  // @import / @charset / @namespace 是整条外链或编码劫持，直接删掉整行。
+  out = out.replace(/@(?:import|charset|namespace)\b[^;]*;/gi, "");
+  // @font-face 会拉外链字体，@supports/@media/@keyframes 保留外层但内部同样过滤声明。
+  out = out.replace(/@font-face\b[^}]*\}/gi, "");
+  // 任何 url() / image-set() / expression() / -moz-binding / behavior 都视为攻击向量。
+  if (/\b(?:url|image-set|expression)\s*\(|[-a-z]*binding\s*:|behavior\s*:/i.test(out)) {
+    // 不整体放弃（否则一份邮件里有一条坏规则就全丢排版），逐条剥离危险声明。
+    out = out.replace(/[^{}]*\b(?:url|image-set|expression)\s*\([^)]*\)[^{};]*;?/gi, "");
+    out = out.replace(/[^{}]*(?:[-a-z]*binding|behavior)\s*:[^{};]*;?/gi, "");
+  }
+  // 二次校验：还有残留（含试图闭合 <style> 逃进文档流的 HTML 标签）就整块丢弃，
+  // 绝不带着可疑内容进文档。
+  if (/<\/?[a-z]|\b(?:url|image-set|expression)\s*\(|[-a-z]*binding\s*:|behavior\s*:|@import|@charset|@namespace/i.test(out)) {
+    return "";
+  }
+  return out.trim();
 }
 
 function isRemoteURL(src: string): boolean {
@@ -127,7 +172,7 @@ function escapeHTML(s: string): string {
 }
 
 // wrap 把正文包成一个完整文档。
-function wrap(content: string, plainText: boolean): string {
+function wrap(content: string, plainText: boolean, styles = ""): string {
   const csp = [
     "default-src 'none'",
     "img-src data: https: http: cid:",
@@ -151,6 +196,7 @@ function wrap(content: string, plainText: boolean): string {
   table { max-width: 100%; }
   pre { white-space: pre-wrap; }
   ${plainText ? "body { white-space: pre-wrap; font-family: ui-monospace, monospace; }" : ""}
+  ${styles}
 </style>
 </head><body>${content}</body></html>`;
 }

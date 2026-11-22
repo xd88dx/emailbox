@@ -101,6 +101,57 @@ describe("buildDocument · HTML 净化", () => {
   });
 });
 
+describe("buildDocument · 邮件自带样式", () => {
+  // GitHub Actions 这类通知邮件的排版全靠 <style> 里的 CSS 类，
+  // 整块丢掉就会变成截图里「Status/Job 竖排、按钮错位」的样子。
+  it("保留纯排版样式，让通知邮件的 CSS 类继续生效", () => {
+    const { html } = buildDocument(
+      '<style>.status { color: #22863a; font-weight: 600 }</style><span class="status">Success</span>',
+      "html",
+      false,
+    );
+    expect(html).toContain(".status { color: #22863a; font-weight: 600 }");
+    // 正文里的 <style> 被抽走，只剩带类的元素。
+    expect(parse(html).body.querySelector("style")).toBeNull();
+  });
+
+  it("抽掉 @import 外链样式", () => {
+    const { html } = buildDocument(
+      '<style>@import url("https://evil.example/x.css"); .a{color:red}</style><p class="a">x</p>',
+      "html",
+      false,
+    );
+    expect(html).not.toContain("@import");
+    expect(html).toContain(".a{color:red}");
+  });
+
+  it("抽掉 url() / expression() / behavior 等外链与执行向量", () => {
+    const { html } = buildDocument(
+      '<style>.a{background:url(https://tracker.example/p.png)}' +
+        ".b{width:expression(alert(1))}.c{behavior:url(x.htc)}.d{color:blue}</style>" +
+        '<p class="a d">x</p>',
+      "html",
+      false,
+    );
+    expect(html).not.toMatch(/url\s*\(/i);
+    expect(html).not.toContain("expression");
+    expect(html).not.toContain("behavior");
+    expect(html).not.toContain("tracker.example");
+    // 干净的声明要留下。
+    expect(html).toContain(".d{color:blue}");
+  });
+
+  it("含试图逃出 style 块的 HTML 标签时整块丢弃", () => {
+    const { html } = buildDocument(
+      '<style>.a{color:red}</style><style></style><script>alert(1)</script><p>x</p>',
+      "html",
+      false,
+    );
+    expect(html).not.toContain("alert(1)");
+    expect(html).not.toContain("<script");
+  });
+});
+
 describe("buildDocument · 纯文本正文", () => {
   it("整段转义，不产生任何元素", () => {
     const { html, hadRemoteImages } = buildDocument("<script>alert(1)</script>", "text", false);

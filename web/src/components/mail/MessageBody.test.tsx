@@ -10,6 +10,10 @@ import { MessageBody } from "./MessageBody";
 // （macOS WKWebView / Windows WebView2 / Linux WebKitGTK）。sandbox 与 CSP 都是
 // 这两个引擎原生支持的标准特性，行为与浏览器一致；但一旦有人为了「让某封邮件
 // 显示正常」加上 allow-scripts，桌面版丢的就不只是一个标签页。
+//
+// 2026-11-23：为让邮件里的链接能点开新标签，按 06 文档恢复 allow-popups
+// 与 allow-popups-to-escape-sandbox。这两项只放开「导航」，不放开脚本与同源读取，
+// 下面两专门用反例钉死 allow-scripts / allow-same-origin 永远不许出现。
 
 function iframeOf(container: HTMLElement): HTMLIFrameElement {
   const frame = container.querySelector("iframe");
@@ -28,13 +32,13 @@ function imageOf(container: HTMLElement): HTMLImageElement {
 }
 
 describe("MessageBody · sandbox 隔离", () => {
-  it("iframe 带空 sandbox：属性存在且不授予任何能力", () => {
+  it("iframe sandbox 只放开弹窗导航，不给脚本与同源", () => {
     const { container } = render(<MessageBody body="<p>hi</p>" bodyType="html" />);
     const sandbox = iframeOf(container).getAttribute("sandbox");
 
-    // null 表示属性缺失——那等于完全没有沙箱，比空字符串危险得多，必须区分开。
+    // null 表示属性缺失——那等于完全没有沙箱，必须区分开。
     expect(sandbox).not.toBeNull();
-    expect(sandbox).toBe("");
+    expect(sandbox).toBe("allow-popups allow-popups-to-escape-sandbox");
   });
 
   it("永远不授予 allow-scripts 与 allow-same-origin", () => {
@@ -61,7 +65,7 @@ describe("MessageBody · sandbox 隔离", () => {
     const { container } = render(<MessageBody body="<script>alert(1)</script>" bodyType="text" />);
     const frame = iframeOf(container);
 
-    expect(frame.getAttribute("sandbox")).toBe("");
+    expect(frame.getAttribute("sandbox")).toBe("allow-popups allow-popups-to-escape-sandbox");
     // 纯文本要被转义成实体，而不是作为标签留在文档里。
     expect(frame.getAttribute("srcdoc") ?? "").toContain("&lt;script&gt;");
   });
@@ -87,8 +91,10 @@ describe("MessageBody · 远程图片", () => {
     fireEvent.click(screen.getByText("仍要加载"));
 
     expect(imageOf(container).getAttribute("src")).toBe("https://tracker.test/pixel.gif");
-    // 放行图片是用户对「暴露已读」的知情选择，与脚本隔离无关，
-    // 后者在任何时候都不该跟着一起放开。
-    expect(iframeOf(container).getAttribute("sandbox")).toBe("");
+    // 放行图片是用户对「暴露已读」的知情选择，与沙箱能力无关，
+    // 后者在任何时候都不该跟着一起变化。
+    expect(iframeOf(container).getAttribute("sandbox")).toBe(
+      "allow-popups allow-popups-to-escape-sandbox",
+    );
   });
 });
