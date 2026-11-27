@@ -13,7 +13,8 @@ import {
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import { isTerminal, jobApi } from "@/api/jobs";
 import { mailApi, type TenantRef } from "@/api/mail";
-import { AutoRefreshControl } from "@/components/mail/AutoRefreshControl";
+import { MailSettingsDialog } from "@/components/mail/MailSettingsDialog";
+import type { DefaultFolder } from "@/lib/mailPrefs";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { useJobStore } from "@/store/jobStore";
 import { useSelectionStore } from "@/store/selectionStore";
@@ -39,6 +40,10 @@ interface MailToolbarProps {
   onManualCheckStarted: () => void;
   // 用户刚打开自动刷新:让 hook 立即检查一次。
   onAutoRefreshEnabled: () => void;
+  // 打开邮箱时默认停在哪个分类。偏好本身存在 lib/mailPrefs（localStorage），
+  // 这里只把它转交给设置弹窗。
+  defaultFolder: DefaultFolder;
+  onDefaultFolderChange: (folder: DefaultFolder) => void;
 }
 
 // 用 forwardRef 保持与 Phosphor 图标同一个类型,Kumo 的 icon prop 只接受图标组件。
@@ -58,6 +63,8 @@ export function MailToolbar({
   autoRunning,
   onManualCheckStarted,
   onAutoRefreshEnabled,
+  defaultFolder,
+  onDefaultFolderChange,
 }: MailToolbarProps) {
   // 稳定引用：取回 Set 再 useMemo 成数组。直接在选择器里 Array.from
   // 会让 zustand v5 的快照每次都不同，进而无限重渲染（AGENTS.md §6.3）。
@@ -124,7 +131,10 @@ export function MailToolbar({
     });
 
   return (
-    <div className="flex h-(--ebx-toolbar-h) shrink-0 items-center gap-2 overflow-x-auto border-b border-kumo-line px-4">
+    /* 窄屏必换成两行:导入/导出/刷新 与 批量动作加起来约 500px,416px 的手机上
+       一行放不下,而横向滚动会把「已读」之后的动作永远藏在屏幕外——用户看不到
+       就以为没有。md 起一屏放不下时仍保留横向滚动(1100px 以下整排约需 890px)。 */
+    <div className="flex shrink-0 flex-wrap items-center gap-2 overflow-x-auto border-b border-kumo-line px-4 py-2 md:h-(--ebx-toolbar-h) md:flex-nowrap md:py-0">
       <LinkButton href="/mail/import" variant="secondary" icon={Upload}>
         导入
       </LinkButton>
@@ -211,7 +221,16 @@ export function MailToolbar({
         </span>
       )}
       {error && <span className="ml-2 shrink-0 text-sm text-kumo-danger">{error}</span>}
-      <AutoRefreshControl running={autoRunning} onEnabled={onAutoRefreshEnabled} />
+      {/* 设置项（信箱偏好 / 自动刷新）收进齿轮弹窗，工具栏只留操作按钮：
+          这些设置是偶尔改一次的偏好，常驻在动作条上既挤位置又要解释。 */}
+      <div className="ml-auto flex shrink-0 items-center">
+        <MailSettingsDialog
+          defaultFolder={defaultFolder}
+          onDefaultFolderChange={onDefaultFolderChange}
+          autoRunning={autoRunning}
+          onAutoRefreshEnabled={onAutoRefreshEnabled}
+        />
+      </div>
     </div>
   );
 }

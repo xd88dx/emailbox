@@ -1,14 +1,10 @@
 import { Tabs } from "@cloudflare/kumo/components/tabs";
 import type { MailFolder } from "@/api/mail";
+import { FOLDERS } from "@/lib/mailPrefs";
 
 // 文件夹取值使用统一命名，IMAP 侧由 pkg/mailer/imapx/folders.go 映射到各服务商的实际名称，
 // 前端不需要知道那套映射。all 是服务层合成的（收件箱 + 垃圾箱归并），不对应真实文件夹。
-const FOLDERS: { value: MailFolder; label: string }[] = [
-  { value: "inbox", label: "收件箱" },
-  { value: "junkemail", label: "垃圾箱" },
-  { value: "deleteditems", label: "已删除" },
-  { value: "all", label: "全部" },
-];
+// 标签与顺序在 lib/mailPrefs 里维护，工具栏的「默认打开」下拉共用同一份。
 
 interface FolderTabsProps {
   value: MailFolder;

@@ -135,6 +135,9 @@ interface MessageListProps {
   onAccountsChanged?: () => void;
   // 详情真正加载完成后由外层转交的置已读信号。seq 区分同一封邮件的多次打开。
   readSignal?: { accountID: string; message: Message; seq: number } | null;
+  // 打开邮箱时停在哪个分类。外层从 localStorage 偏好读出并传进来，只用作初值：
+  // 之后在这里点标签翻分类，不该反过来改掉用户设的「默认打开」。
+  defaultFolder: MailFolder;
 }
 
 export function MessageList({
@@ -146,8 +149,9 @@ export function MessageList({
   onClose,
   onAccountsChanged,
   readSignal,
+  defaultFolder,
 }: MessageListProps) {
-  const [folder, setFolder] = useState<MailFolder>("inbox");
+  const [folder, setFolder] = useState<MailFolder>(defaultFolder);
   const [readFilter, setReadFilter] = useState<ReadFilter>("all");
   const [reloadToken, setReloadToken] = useState(0);
   // 用 mailScopeKey 而不是直接插 tenantID：scope 可能是对象，
@@ -365,6 +369,16 @@ export function MessageList({
       return { ...prev, selected };
     });
 
+  // 「选中未读」只作用于当前筛选下可见、且仍未读的那些邮件——和全选同一口径：
+  // 列表按需分页，把没加载进来的邮件算进去，用户会以为只选了几封、实际动了整个文件夹。
+  const unreadVisibleKeys = visible.filter((m) => !m.is_read).map(refKey);
+  const selectUnread = () =>
+    patch(key, (prev) => {
+      const selected = new Set(prev.selected);
+      for (const k of unreadVisibleKeys) selected.add(k);
+      return { ...prev, selected };
+    });
+
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* 与详情 header 用同一套 items-start + px-4 py-3：两个面板顶部对齐、
@@ -411,6 +425,15 @@ export function MessageList({
           onCheckedChange={toggleAllVisible}
           aria-label="全选当前列表的邮件"
         />
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={unreadVisibleKeys.length === 0}
+          title="选中当前列表里所有未读邮件"
+          onClick={selectUnread}
+        >
+          选中未读
+        </Button>
         <MessageBatchActions
           tenantID={tenantID}
           accountID={accountID}

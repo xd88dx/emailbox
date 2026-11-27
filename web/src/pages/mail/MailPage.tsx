@@ -24,6 +24,7 @@ import { MessageDetail } from "@/components/mail/MessageDetail";
 import { MessageList } from "@/components/mail/MessageList";
 import { refKey } from "@/components/mail/messageRef";
 import { useAutoRefresh } from "@/lib/useAutoRefresh";
+import { useDefaultFolder } from "@/lib/mailPrefs";
 import { useAuthStore } from "@/store/authStore";
 import { useJobStore } from "@/store/jobStore";
 import { useSelectionStore } from "@/store/selectionStore";
@@ -124,6 +125,9 @@ export default function MailPage({ scope }: MailPageProps = {}) {
   // 用户刚从关闭切到开启时递增,让 hook 立即跑一轮而不是等满间隔。
   const [autoKick, setAutoKick] = useState(0);
   const autoRefresh = useAutoRefresh(autoEnabled, autoMinutes, tenantID, reloadAccounts, autoKick);
+  // 进邮箱时停在哪个分类。只影响「点开邮箱那一刻」：设成收件箱后，
+  // 用户在邮件栏里翻到「已收信」并不会把默认值一起改掉。
+  const [defaultFolder, setDefaultFolder] = useDefaultFolder();
 
   // 分组与统计只在换租户或任务结束/批量操作后重取:它们与筛选条件无关。
   // 之前它们和账号列表串在同一个 Promise.all 里,每切换一次状态都要等
@@ -294,6 +298,7 @@ export default function MailPage({ scope }: MailPageProps = {}) {
         onClose={closeAccount}
         onAccountsChanged={onMessagesChanged}
         readSignal={readSignal}
+        defaultFolder={defaultFolder}
       />
     </div>
   ) : null;
@@ -372,6 +377,8 @@ export default function MailPage({ scope }: MailPageProps = {}) {
           autoRunning={autoRefresh.running}
           onManualCheckStarted={autoRefresh.resetTimer}
           onAutoRefreshEnabled={() => setAutoKick((v) => v + 1)}
+          defaultFolder={defaultFolder}
+          onDefaultFolderChange={setDefaultFolder}
         />
       }
       status={<MailStatusBar stats={stats} />}

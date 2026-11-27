@@ -15,7 +15,8 @@ interface AutoRefreshControlProps {
   onEnabled: () => void;
 }
 
-// 右上角的自动刷新开关。偏好存在用户资料里,换设备后仍然生效。
+// 设置弹窗里的「自动刷新」一行。偏好存在用户资料里,换设备后仍然生效。
+// 原先它常驻在工具栏右侧,现在收进设置弹窗,但仍保留运行状态与间隔选择。
 export function AutoRefreshControl({ running, onEnabled }: AutoRefreshControlProps) {
   const user = useAuthStore((s) => s.user);
   const deployDefault = useAuthStore((s) => s.autoRefreshDefaultMinutes);
@@ -47,23 +48,31 @@ export function AutoRefreshControl({ running, onEnabled }: AutoRefreshControlPro
   }
 
   return (
-    <div className="ml-auto flex shrink-0 items-center gap-2 pl-2">
-      {error && (
-        <span className="max-w-40 truncate text-xs text-kumo-danger" title={error}>
-          {error}
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-1.5 text-xs text-kumo-subtle">
+          <StatusDot
+            tone={enabled ? "online" : "idle"}
+            className={running ? "animate-pulse" : undefined}
+            label={running ? "自动刷新进行中" : enabled ? "自动刷新已开启" : "自动刷新已关闭"}
+          />
+          {running ? "自动刷新中" : enabled ? "自动刷新已开启" : "自动刷新已关闭"}
         </span>
-      )}
-      <span className="hidden items-center gap-1.5 text-xs text-kumo-subtle sm:flex">
-        <StatusDot
-          tone={enabled ? "online" : "idle"}
-          className={running ? "animate-pulse" : undefined}
-          label={running ? "自动刷新进行中" : enabled ? "自动刷新已开启" : "自动刷新已关闭"}
+        <Switch
+          aria-label="自动刷新"
+          checked={enabled}
+          disabled={saving}
+          onCheckedChange={(checked: boolean) =>
+            void save(checked, minutes).then((ok) => {
+              if (ok && checked) onEnabled();
+            })
+          }
         />
-        {running ? "自动刷新中" : enabled ? "自动刷新已开启" : "自动刷新已关闭"}
-      </span>
+      </div>
       {enabled && (
         <Select
-          className="w-28"
+          className="w-full"
+          size="sm"
           aria-label="自动刷新间隔"
           items={options}
           value={String(minutes)}
@@ -74,16 +83,7 @@ export function AutoRefreshControl({ running, onEnabled }: AutoRefreshControlPro
           }}
         />
       )}
-      <Switch
-        aria-label="自动刷新"
-        checked={enabled}
-        disabled={saving}
-        onCheckedChange={(checked: boolean) =>
-          void save(checked, minutes).then((ok) => {
-            if (ok && checked) onEnabled();
-          })
-        }
-      />
+      {error && <p className="text-xs text-kumo-danger">{error}</p>}
     </div>
   );
 }

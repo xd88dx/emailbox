@@ -75,7 +75,11 @@ export function AccountFilterBar({
       {/* 输入框 + 状态下拉的总宽度与工具栏的「已读/启用/停用/删除」组一致,
           右边缘落在同一条竖线上;
           右侧滑出的邮件面板也以那条线为左边界(--ebx-action-row-w)。 */}
-      <div className="flex min-w-0 flex-1 items-center gap-3 xl:w-(--ebx-action-row-w) xl:flex-none">
+      {/* 窄屏独占一行：与分组下拉并排时，这一组会被 flex-1 压到 92px，
+          而它的内容需要 156px（搜索框 + 144px 状态下拉），状态下拉于是被裁到
+          只剩半截字。父级是 flex-wrap，给 w-full 就能换到第二行拿满整行。
+          ≥1280 时左栏在场，搜索+状态是一行里的第二段，改用固定宽度。 */}
+      <div className="flex w-full min-w-0 items-center gap-3 xl:w-(--ebx-action-row-w) xl:flex-none">
         {/* 清楚按钮只在有内容时出现——常驻的空按钮占着一个点击位却什么也不做。 */}
         <div className="relative min-w-0 flex-1">
           <Input
