@@ -3,6 +3,8 @@ package service
 import (
 	"fmt"
 	"time"
+
+	"emailbox/pkg/mailer"
 )
 
 // messageCacheTTL 是收件箱首页的缓存时长。
@@ -78,4 +80,32 @@ func (s *MessageService) invalidateMessageCache(tenantID, accountID string) {
 			delete(s.cache, key)
 		}
 	}
+}
+
+// 单文件夹首页的缓存键。folder=all 归并时顺带写回这两个键，
+// 之后切到「收件箱」就能直接命中，不必为同一批邮件再打一次上游。
+func (s *MessageService) folderCacheKey(
+	tenantID, accountID string, folder mailer.Folder, top int,
+) string {
+	return messageCacheKey(tenantID, accountID, messageListCacheOptions{
+		folder: string(folder), skip: 0, top: top,
+	})
+}
+
+// cacheGetAllFolders 取回 folder=all 归并所需的两个单文件夹缓存。
+//
+// 两片都在才算命中：只拿到一片时照样要打上游，而打上游后另一片也会被写回，
+// 所以「部分命中」没有可利用的价值。
+func (s *MessageService) cacheGetAllFolders(
+	tenantID, accountID string, top int,
+) ([]mailer.Message, []mailer.Message, bool) {
+	inbox, ok := s.cacheGet(s.folderCacheKey(tenantID, accountID, mailer.FolderInbox, top))
+	if !ok {
+		return nil, nil, false
+	}
+	junk, ok := s.cacheGet(s.folderCacheKey(tenantID, accountID, mailer.FolderJunk, top))
+	if !ok {
+		return nil, nil, false
+	}
+	return inbox.Items, junk.Items, true
 }

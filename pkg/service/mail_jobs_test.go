@@ -448,3 +448,91 @@ func TestListAllFetchesFoldersInParallel(t *testing.T) {
 		t.Fatalf("结果缺少邮件夹: %+v", seen)
 	}
 }
+
+// countingListClient 按文件夹返回固定邮件，并记下每个文件夹被拉了几次。
+type countingListClient struct {
+	*fakeMailClient
+	mu    sync.Mutex
+	calls map[mailer.Folder]int
+}
+
+func (f *countingListClient) List(
+	_ context.Context, _ mailer.Credential, opt mailer.ListOptions,
+) ([]mailer.Message, error) {
+	f.mu.Lock()
+	f.calls[opt.Folder]++
+	f.mu.Unlock()
+	return []mailer.Message{{
+		ID:         string(opt.Folder),
+		Folder:     opt.Folder,
+		ReceivedAt: time.Now(),
+	}}, nil
+}
+
+// 先拉「已收信」再切「收件箱」不该再打一次上游:
+// listAll 归并前会把两个单文件夹的结果各存一份,切过去时直接命中。
+func TestListAllSeedsPerFolderCache(t *testing.T) {
+	configs.AppConfig = &configs.Config{Session: configs.SessionConfig{ExpireHour: 24}}
+	store := testStore(t)
+	cipher, err := crypto.New("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := service.NewAuthService(store)
+	registered, _, err := auth.Register(context.Background(), model.RegisterRequest{
+		Username: "seedcache", Email: "seedcache@example.com", Password: "secret12",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := registered.Tenants[0].ID
+	accounts := service.NewAccountService(store, cipher, quota.NewService(store))
+	created, err := accounts.Create(context.Background(), tenantID, model.CreateMailAccountRequest{
+		Email: "seedcache@qq.com", Password: "authcode",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := &countingListClient{
+		fakeMailClient: &fakeMailClient{},
+		calls:          map[mailer.Folder]int{},
+	}
+	messages := service.NewMessageService(store, cipher, quota.NewService(store), service.ChainOptions{}).
+		WithChainFactory(func(*model.MailAccount) mailer.Client { return client })
+
+	if _, err := messages.List(context.Background(), tenantID, created.ID,
+		mailer.ListOptions{Folder: mailer.FolderAll, Top: 10}, false); err != nil {
+		t.Fatalf("folder=all 拉取失败: %v", err)
+	}
+	if client.calls[mailer.FolderInbox] != 1 || client.calls[mailer.FolderJunk] != 1 {
+		t.Fatalf("folder=all 应各拉一次,实际 %+v", client.calls)
+	}
+
+	result, err := messages.List(context.Background(), tenantID, created.ID,
+		mailer.ListOptions{Folder: mailer.FolderInbox, Top: 10}, false)
+	if err != nil {
+		t.Fatalf("folder=inbox 拉取失败: %v", err)
+	}
+	if client.calls[mailer.FolderInbox] != 1 {
+		t.Fatalf("切到收件箱后又打了一次上游,期望命中缓存: %+v", client.calls)
+	}
+	if len(result.Items) != 1 || result.Items[0].Folder != mailer.FolderInbox {
+		t.Fatalf("缓存里取回的不是收件箱那一片: %+v", result.Items)
+	}
+
+	// 标已读要让「单文件夹」的缓存一起失效,否则再打开收件箱看到的仍是旧的已读状态。
+	// invalidateMessageCache 按 tenant|account| 前缀清,新键也在同一前缀下。
+	if _, err := messages.MarkRead(context.Background(), tenantID, created.ID, []mailer.MessageRef{
+		{ID: "inbox", IDMode: mailer.IDModeNone, Folder: mailer.FolderInbox},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.List(context.Background(), tenantID, created.ID,
+		mailer.ListOptions{Folder: mailer.FolderInbox, Top: 10}, false); err != nil {
+		t.Fatalf("标已读后重新拉取失败: %v", err)
+	}
+	if client.calls[mailer.FolderInbox] != 2 {
+		t.Fatalf("标已读后单文件夹缓存没有失效: %+v", client.calls)
+	}
+}

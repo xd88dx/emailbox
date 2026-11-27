@@ -138,17 +138,43 @@ func (s *MessageService) List(
 			}
 		}
 	}
+	// folder=all 归并的是收件箱与垃圾箱，缓存按这两个文件夹各存一份（见 listAll）。
+	// 两片都在时直接归并返回：切到「收件箱」也就不必为同一批邮件再打一次上游。
+	// top 必须与 listAll 内部单文件夹取数的 top 一致，否则键对不上、永远不命中。
+	if opt.Folder == mailer.FolderAll && cacheable && !force {
+		inbox, junk, hit := s.cacheGetAllFolders(tenantID, accountID, opt.Skip+opt.Top)
+		if hit {
+			cached = true
+			merged := mergeFolders(inbox, junk)
+			if opt.Skip < len(merged) {
+				merged = merged[opt.Skip:]
+			} else {
+				merged = nil
+			}
+			if len(merged) > opt.Top {
+				merged = merged[:opt.Top]
+			}
+			return &MessageListResult{Items: nonNil(merged), Channel: account.AuthChannel}, nil
+		}
+	}
+
 	// 配额在走远端之前扣：扣完才发请求，超额时一个远端调用都不产生。
+	// 已由缓存满足的请求在上面就返回了，不会扣额度。
 	if err := s.quota.CheckAndConsume(ctx, tenantID, model.MetricMailFetch, 1); err != nil {
 		return nil, err
 	}
 
 	client, record := s.clientFor(ctx, tenantID, account)
 	if opt.Folder == mailer.FolderAll {
-		result, unread, err := s.listAll(ctx, client, record, cred, opt, wantUnread)
+		result, unread, err := s.listAll(
+			ctx, tenantID, accountID, client, record, cred, opt, wantUnread, cacheable,
+		)
 		if err != nil {
 			return nil, err
 		}
+		// Channel 在 listAll 之外补:err 已经由它写回账号访问结果了,
+		// 走到这里的 err 必然是 nil,直接取账号当前记录的通道。
+		result.Channel = account.AuthChannel
 		s.rememberUnread(ctx, tenantID, accountID, unread)
 		if cacheable {
 			s.cachePut(cacheKey, result)
@@ -177,8 +203,9 @@ func (s *MessageService) List(
 // 两个邮件夹各取 skip+top 条再归并：只取 top 条的话，
 // 当一个邮件夹的邮件明显更新时，翻到第二页会漏掉另一个邮件夹的邮件。
 func (s *MessageService) listAll(
-	ctx context.Context, client mailer.Client, record func(error),
-	cred mailer.Credential, opt mailer.ListOptions, wantUnread bool,
+	ctx context.Context, tenantID, accountID string, client mailer.Client,
+	record func(error), cred mailer.Credential, opt mailer.ListOptions,
+	wantUnread, cacheable bool,
 ) (*MessageListResult, *int, error) {
 	folders := []mailer.Folder{mailer.FolderInbox, mailer.FolderJunk}
 	// 两个邮件夹互不依赖,各自从会话池取一条连接并行拉。串行时一次
@@ -204,9 +231,13 @@ func (s *MessageService) listAll(
 	}
 	wg.Wait()
 
-	merged := make([]mailer.Message, 0, opt.Top*2)
+	parts := make([][]mailer.Message, len(folders))
 	var firstErr error
 	var unread *int
+	// 成功拉到的每个文件夹也按单文件夹的键各存一份：下一次切到「收件箱」或
+	// 「垃圾箱」时直接命中，不必为同一批邮件再打一次上游。键里的 top 与上面
+	// 单文件夹取数用的 top 是同一个值，读取端按同一个式子拼键。
+	cacheTop := opt.Skip + opt.Top
 	for i, folder := range folders {
 		part, count, err := results[i].messages, results[i].unread, results[i].err
 		if err != nil {
@@ -222,17 +253,19 @@ func (s *MessageService) listAll(
 		if count != nil {
 			unread = count
 		}
-		merged = append(merged, part...)
+		if cacheable {
+			s.cachePut(s.folderCacheKey(tenantID, accountID, folder, cacheTop),
+				&MessageListResult{Items: nonNil(part)})
+		}
+		parts[i] = part
 	}
+	merged := mergeFolders(parts[0], parts[1])
 	if len(merged) == 0 && firstErr != nil {
 		record(firstErr)
 		return nil, nil, firstErr
 	}
 	record(nil)
 
-	sort.SliceStable(merged, func(i, j int) bool {
-		return merged[i].ReceivedAt.After(merged[j].ReceivedAt)
-	})
 	if opt.Skip < len(merged) {
 		merged = merged[opt.Skip:]
 	} else {
@@ -242,6 +275,20 @@ func (s *MessageService) listAll(
 		merged = merged[:opt.Top]
 	}
 	return &MessageListResult{Items: nonNil(merged)}, unread, nil
+}
+
+// mergeFolders 把收件箱与垃圾箱的结果按收信时间倒序归并成一份。
+//
+// 走远端拿到两片数据和从缓存里取回两片数据，走的是同一段归并逻辑：
+// 两条路径各写一份的话，翻页与排序的边界迟早会分叉。
+func mergeFolders(inbox, junk []mailer.Message) []mailer.Message {
+	merged := make([]mailer.Message, 0, len(inbox)+len(junk))
+	merged = append(merged, inbox...)
+	merged = append(merged, junk...)
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].ReceivedAt.After(merged[j].ReceivedAt)
+	})
+	return merged
 }
 
 // listMessages 拉一页列表；wantUnread 时走「顺带取未读」的通道能力。
